@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Ivo mkinitcpio post hook. Install to /etc/initcpio/post/ivo.
+# Config at /etc/ivo/sign.conf. Non-zero exit marks the hook failed.
+
+set -u
+
+SIGN_CONF=/etc/ivo/sign.conf
+[ -r "$SIGN_CONF" ] || exit 0
+# shellcheck source=/dev/null
+. "$SIGN_CONF"
+
+: "${IVO_SIGN:?IVO_SIGN not set in $SIGN_CONF}"
+: "${CONFIG:?CONFIG not set in $SIGN_CONF}"
+: "${ROOT:?ROOT not set in $SIGN_CONF}"
+
+box() {
+    local title="$1"; shift
+    local w=66
+    printf '\n'
+    printf '+%s+\n' "$(printf '=%.0s' $(seq 1 $w))"
+    printf '| %-64s |\n' "$title"
+    printf '+%s+\n' "$(printf '=%.0s' $(seq 1 $w))"
+    for line in "$@"; do
+        printf '| %-64s |\n' "$line"
+    done
+    printf '+%s+\n' "$(printf '=%.0s' $(seq 1 $w))"
+    printf '\n'
+}
+
+hash_args=(--hash --config "$CONFIG" --root "$ROOT")
+[ -n "${SUBVOL_ROOT:-}" ] && hash_args+=(--subvol-root "$SUBVOL_ROOT")
+if [ -n "${ISO:-}" ]; then
+    while IFS= read -r img; do
+        [ -n "$img" ] && hash_args+=(--iso "$img")
+    done <<< "$ISO"
+fi
+
+if ! "$IVO_SIGN" "${hash_args[@]}"; then
+    box "IVO: CONFIG HASH FAILED" \
+        "" \
+        "The kernel or initramfs on disk no longer matches the" \
+        "hashes recorded in:" \
+        "  $CONFIG" \
+        "" \
+        "The machine will NOT boot until this is fixed." \
+        "" \
+        "It is easy to beat nettles with someone else's dick." \
+        "                            - Ivo Andric" \
+        "" \
+        "Fix manually:" \
+        "  $IVO_SIGN --hash --config $CONFIG --root $ROOT" \
+        "" \
+        "Or add a fallback entry in the config that names the" \
+        "previous kernel, so a bad update can't brick the boot."
+    exit 1
+fi
+
+if [ -n "${KEY:-}" ] && [ -r "$KEY" ]; then
+    if ! "$IVO_SIGN" --sign --config "$CONFIG" --key "$KEY"; then
+        box "IVO: CONFIG SIGN FAILED" \
+            "" \
+            "The config was re-hashed but signing failed." \
+            "Secure Boot will refuse to load the config." \
+            "" \
+            "Fix manually:" \
+            "  $IVO_SIGN --sign --config $CONFIG --key $KEY"
+        exit 1
+    fi
+fi
+
+exit 0

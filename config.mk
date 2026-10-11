@@ -1,0 +1,7 @@
+THEME           ?= default
+GFX_FMT         ?= bgrx
+LUKS            ?= 0
+LUKS_USE_ARGON2 ?= 0
+LVM             ?= 0
+TPM             ?= 0
+SECURE_BOOT     ?= 0
