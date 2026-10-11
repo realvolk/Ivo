@@ -50,9 +50,16 @@ void gfx_clear(uint32_t rgba)
     if (!g_ready) return;
     uint32_t p = pack(rgba);
     uint32_t pitch_px = g_fb.pitch / 4;
+    uint64_t p2 = ((uint64_t)p << 32) | p;
     for (uint32_t y = 0; y < g_fb.height; y++) {
         uint32_t *row = g_fb.framebuffer + (size_t)y * pitch_px;
-        for (uint32_t x = 0; x < g_fb.width; x++) row[x] = p;
+        uint32_t n = g_fb.width;
+        while (n >= 2) {
+            __builtin_memcpy(row, &p2, 8);
+            row += 2;
+            n -= 2;
+        }
+        if (n) *row = p;
     }
 }
 
@@ -66,9 +73,16 @@ void gfx_fill_rect(int x, int y, int w, int h, uint32_t rgba)
     if (w <= 0 || h <= 0) return;
     uint32_t p = pack(rgba);
     uint32_t pitch_px = g_fb.pitch / 4;
+    uint64_t p2 = ((uint64_t)p << 32) | p;
     for (int r = 0; r < h; r++) {
         uint32_t *row = g_fb.framebuffer + (size_t)(y + r) * pitch_px + x;
-        for (int c = 0; c < w; c++) row[c] = p;
+        int n = w;
+        while (n >= 2) {
+            __builtin_memcpy(row, &p2, 8);
+            row += 2;
+            n -= 2;
+        }
+        if (n) *row = p;
     }
 }
 
@@ -86,21 +100,24 @@ void gfx_fill_rect_a(int x, int y, int w, int h, uint32_t rgba)
     uint8_t sr = (uint8_t)(rgba >> 24);
     uint8_t sg = (uint8_t)(rgba >> 16);
     uint8_t sb = (uint8_t)(rgba >> 8);
+    uint32_t sa = a;
+    uint32_t ia = 255 - a;
+    int bgrx = (g_fb.format == GFX_FMT_BGRX);
     uint32_t pitch_px = g_fb.pitch / 4;
     for (int r = 0; r < h; r++) {
         uint32_t *row = g_fb.framebuffer + (size_t)(y + r) * pitch_px + x;
         for (int c = 0; c < w; c++) {
             uint32_t d = row[c];
             uint8_t dr, dg, db;
-            if (g_fb.format == GFX_FMT_BGRX) {
+            if (bgrx) {
                 db = (uint8_t)(d >> 16); dg = (uint8_t)(d >> 8); dr = (uint8_t)d;
             } else {
                 dr = (uint8_t)(d >> 16); dg = (uint8_t)(d >> 8); db = (uint8_t)d;
             }
-            uint8_t nr = (uint8_t)(mul8(sr, a) + mul8(dr, (uint8_t)(255 - a)));
-            uint8_t ng = (uint8_t)(mul8(sg, a) + mul8(dg, (uint8_t)(255 - a)));
-            uint8_t nb = (uint8_t)(mul8(sb, a) + mul8(db, (uint8_t)(255 - a)));
-            if (g_fb.format == GFX_FMT_BGRX)
+            uint8_t nr = (uint8_t)(mul8(sr, sa) + mul8(dr, (uint8_t)ia));
+            uint8_t ng = (uint8_t)(mul8(sg, sa) + mul8(dg, (uint8_t)ia));
+            uint8_t nb = (uint8_t)(mul8(sb, sa) + mul8(db, (uint8_t)ia));
+            if (bgrx)
                 row[c] = 0xFF000000u | ((uint32_t)nb << 16) | ((uint32_t)ng << 8) | nr;
             else
                 row[c] = 0xFF000000u | ((uint32_t)nr << 16) | ((uint32_t)ng << 8) | nb;
@@ -131,12 +148,30 @@ void gfx_vgradient(int x, int y, int w, int h, uint32_t top, uint32_t bot)
         else
             px = 0xFF000000u | (cr << 16) | (cg << 8) | cb;
         uint32_t *row = g_fb.framebuffer + (size_t)(y + r) * pitch_px + x;
-        for (int c = 0; c < w; c++) row[c] = px;
+        uint64_t px2 = ((uint64_t)px << 32) | px;
+        int n = w;
+        while (n >= 2) {
+            __builtin_memcpy(row, &px2, 8);
+            row += 2;
+            n -= 2;
+        }
+        if (n) *row = px;
     }
 }
 
 void gfx_hline(int x, int y, int w, uint32_t rgba) { gfx_fill_rect(x, y, w, 1, rgba); }
 void gfx_vline(int x, int y, int h, uint32_t rgba) { gfx_fill_rect(x, y, 1, h, rgba); }
+
+static inline void gfx_hline_raw(int x, int y, int w, uint32_t rgba)
+{
+    if (w <= 0 || y < 0 || y >= (int)g_fb.height) return;
+    if (x < 0) { w += x; x = 0; }
+    if (x + w > (int)g_fb.width) w = (int)g_fb.width - x;
+    if (w <= 0) return;
+    uint32_t p = pack(rgba);
+    uint32_t *row = g_fb.framebuffer + (size_t)y * (g_fb.pitch / 4) + x;
+    while (w--) *row++ = p;
+}
 
 void gfx_rounded_rect(int x, int y, int w, int h, int radius, uint32_t rgba)
 {
@@ -152,10 +187,33 @@ void gfx_rounded_rect(int x, int y, int w, int h, int radius, uint32_t rgba)
         int lim = r * r - dy0 * dy0;
         int dx = 0;
         while ((dx + 1) * (dx + 1) <= lim) dx++;
-        gfx_fill_rect(x + r - 1 - dx, y + dy, dx + 1, 1, rgba);
-        gfx_fill_rect(x + w - r,     y + dy, dx + 1, 1, rgba);
-        gfx_fill_rect(x + r - 1 - dx, y + h - 1 - dy, dx + 1, 1, rgba);
-        gfx_fill_rect(x + w - r,     y + h - 1 - dy, dx + 1, 1, rgba);
+        int len = dx + 1;
+        gfx_hline_raw(x + r - len, y + dy,        len, rgba);
+        gfx_hline_raw(x + w - r,   y + dy,        len, rgba);
+        gfx_hline_raw(x + r - len, y + h - 1 - dy, len, rgba);
+        gfx_hline_raw(x + w - r,   y + h - 1 - dy, len, rgba);
+    }
+}
+
+void gfx_rounded_rect_erase_gaps(int x, int y, int w, int h,
+                                 int radius, uint32_t behind)
+{
+    if (!g_ready || radius <= 0 || w <= 0 || h <= 0) return;
+    if (radius > w / 2) radius = w / 2;
+    if (radius > h / 2) radius = h / 2;
+    for (int dy = 0; dy < radius; dy++) {
+        int dy0 = radius - dy - 1;
+        int lim = radius * radius - dy0 * dy0;
+        int dx = 0;
+        while ((dx + 1) * (dx + 1) <= lim) dx++;
+        int gap = radius - dx - 1;
+        if (gap <= 0) continue;
+        int ytop = y + dy;
+        int ybot = y + h - 1 - dy;
+        gfx_fill_rect(x, ytop, gap, 1, behind);
+        gfx_fill_rect(x + w - gap, ytop, gap, 1, behind);
+        gfx_fill_rect(x, ybot, gap, 1, behind);
+        gfx_fill_rect(x + w - gap, ybot, gap, 1, behind);
     }
 }
 
@@ -176,6 +234,15 @@ void gfx_blit_glyph(int x, int y, int w, int h, const uint8_t *cov, uint32_t rgb
             if (xx < 0 || xx >= (int)g_fb.width) continue;
             uint8_t a = row_cov[c];
             if (a == 0) continue;
+            if (a == 255) {
+                if (g_fb.format == GFX_FMT_BGRX)
+                    row[xx] = 0xFF000000u | ((uint32_t)cb << 16)
+                            | ((uint32_t)cg << 8) | cr;
+                else
+                    row[xx] = 0xFF000000u | ((uint32_t)cr << 16)
+                            | ((uint32_t)cg << 8) | cb;
+                continue;
+            }
             uint32_t d = row[xx];
             uint8_t dr, dg, db;
             if (g_fb.format == GFX_FMT_BGRX) {

@@ -41,11 +41,8 @@ static void scroll_up(int pixels)
 void con_clear(void)
 {
     gfx_clear(theme_current.bg);
-    int W = gfx_width();
-    int H = gfx_height();
-    g_cx = (W - 720) / 2;
-    if (g_cx < 40) g_cx = 40;
-    g_cy = H / 3;
+    g_cx = pad();
+    g_cy = pad();
     g_fg = theme_current.fg;
 }
 
@@ -88,6 +85,18 @@ void con_puts(const char *s)
     while (*s) con_putc(*s++);
 }
 
+void con_clear_row(void)
+{
+    if (!gfx_available()) return;
+    int W = gfx_width();
+    int P = pad();
+    int lh = text_height();
+    if (g_cx < P) g_cx = P;
+    int w = W - P - g_cx;
+    if (w <= 0) return;
+    gfx_fill_rect(g_cx, g_cy, w, lh, theme_current.bg);
+}
+
 void halt(void)
 {
     for (;;) __asm__ volatile("cli; hlt");
@@ -96,17 +105,16 @@ void halt(void)
 int con_read_secret(const char *label, char *out, size_t max_len, char echo)
 {
     con_clear();
-    int W = gfx_width();
     int lh = text_height();
-    int P  = (W - 720) / 2;
-    if (P < 40) P = 40;
-    int y0 = gfx_height() / 3;
+    int P  = pad();
+    int y0 = pad();
 
     size_t idx = 0;
     int redraw = 1;
     for (;;) {
         if (redraw) {
-            gfx_fill_rect(P, y0 - 4, 720, lh + 8, theme_current.bg);
+            gfx_fill_rect(0, y0 - 4, gfx_width(), lh + 8,
+                          theme_current.bg);
             int x = P;
             text_draw(x << 2, y0, label, theme_current.fg);
             x += text_width(label);
@@ -115,7 +123,7 @@ int con_read_secret(const char *label, char *out, size_t max_len, char echo)
             for (size_t i = 0; i < idx; i++) {
                 char buf[2] = { echo, 0 };
                 text_draw(x << 2, y0, buf, theme_current.fg);
-                x += text_width(" ");
+                x += text_width(buf);
             }
             redraw = 0;
         }

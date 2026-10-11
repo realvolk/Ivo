@@ -29,43 +29,41 @@ void frame_init(void)
     g_content_w = g_pw - 2 * theme_current.padding;
 }
 
-void frame_begin(const char *title)
+void frame_title(const char *title)
 {
-    gfx_clear(theme_current.bg);
-
-    int r = theme_current.corner_radius;
-    gfx_rounded_rect(g_px + 3, g_py + 4, g_pw, g_ph, r,
-                     theme_current.panel_shadow);
-    gfx_rounded_rect(g_px, g_py, g_pw, g_ph, r, theme_current.panel_bg);
-
-    /* Border: 1px stroke drawn as 4 thin lines + corner arcs is fussy;
-     * for now draw a rounded outline by clearing pixels is even worse.
-     * Simpler: draw filled rounded rect of border colour, then a
-     * 1px-inset rounded rect of panel_bg. */
-    gfx_rounded_rect(g_px, g_py, g_pw, g_ph, r, theme_current.panel_border);
-    if (r > 0) {
-        gfx_rounded_rect(g_px + 1, g_py + 1, g_pw - 2, g_ph - 2, r - 1,
-                         theme_current.panel_bg);
-    } else {
-        gfx_fill_rect(g_px + 1, g_py + 1, g_pw - 2, g_ph - 2,
-                      theme_current.panel_bg);
-    }
-
-    /* Title bar: gradient strip, clipped to panel content top.
-     * Corners not rounded here; overlap with panel edges is minimal. */
     int th = title_height();
     gfx_vgradient(g_px + 1, g_py + 1, g_pw - 2, th,
                   theme_current.title_bg_top, theme_current.title_bg_bottom);
-
     if (title) {
         int tw = text_width(title);
         int tx = g_px + (g_pw - tw) / 2;
         int ty = g_py + theme_current.padding;
         text_draw(tx << 2, ty, title, theme_current.title_fg);
     }
-
-    /* Separator between title and content. */
     gfx_hline(g_px + 1, g_py + th, g_pw - 2, theme_current.sep);
+}
+
+void frame_begin(const char *title)
+{
+    gfx_fill_rect(g_px, g_py, g_pw, g_ph, theme_current.bg);
+
+    int r = theme_current.corner_radius;
+    gfx_rounded_rect(g_px + 3, g_py + 4, g_pw, g_ph, r,
+                     theme_current.panel_shadow);
+    gfx_rounded_rect(g_px, g_py, g_pw, g_ph, r, theme_current.panel_bg);
+
+    gfx_rounded_rect(g_px, g_py, g_pw, g_ph, r, theme_current.panel_border);
+    if (r > 0) {
+        gfx_rounded_rect(g_px + 1, g_py + 1, g_pw - 2, g_ph - 2, r - 1,
+                         theme_current.panel_bg);
+        gfx_rounded_rect_erase_gaps(g_px, g_py, g_pw, g_ph, r,
+                                    theme_current.bg);
+    } else {
+        gfx_fill_rect(g_px + 1, g_py + 1, g_pw - 2, g_ph - 2,
+                      theme_current.panel_bg);
+    }
+
+    frame_title(title);
 }
 
 void frame_end(void) { }
@@ -77,10 +75,35 @@ void frame_sep(int row)
     gfx_hline(g_content_x, y, g_content_w, theme_current.sep);
 }
 
+/* Used when transitioning from a full-screen view (the
+ * menu) to a partial one (boot status) without a frame_begin. */
+void frame_content_clear(void)
+{
+    int rows_h = FRAME_ROWS * theme_current.row_height;
+    gfx_fill_rect(g_content_x, g_content_y, g_content_w, rows_h,
+                  theme_current.panel_bg);
+}
+
 void frame_row(int row, const char *s, uint32_t fg)
 {
     int y = g_content_y + row * theme_current.row_height;
     text_draw(g_content_x << 2, y, s, fg);
+}
+
+void frame_row_clear(int row)
+{
+    int y = g_content_y + row * theme_current.row_height;
+    gfx_fill_rect(g_content_x, y, g_content_w,
+                  theme_current.row_height, theme_current.panel_bg);
+}
+
+void frame_row_clear_right(int row, int width)
+{
+    int y = g_content_y + row * theme_current.row_height;
+    int x = g_content_x + g_content_w - width - 14;
+    if (x < g_content_x) x = g_content_x;
+    gfx_fill_rect(x, y, g_content_x + g_content_w - x,
+                  theme_current.row_height, theme_current.panel_bg);
 }
 
 void frame_row_sel(int row, const char *s, int selected)
@@ -89,8 +112,10 @@ void frame_row_sel(int row, const char *s, int selected)
     int y    = g_content_y + row * theme_current.row_height;
     int ybox = y + (theme_current.row_height - lh) / 2;
     if (selected) {
-        gfx_rounded_rect(g_content_x, ybox - 2, g_content_w,
-                         lh + 4, 6, theme_current.sel_bg);
+        gfx_fill_rect(g_content_x, ybox - 2, g_content_w, lh + 4,
+                      theme_current.sel_bg);
+        gfx_rounded_rect_erase_gaps(g_content_x, ybox - 2, g_content_w,
+                                    lh + 4, 6, theme_current.panel_bg);
     }
     uint32_t col = selected ? theme_current.sel_fg : theme_current.fg;
     text_draw((g_content_x + 14) << 2, ybox, s, col);

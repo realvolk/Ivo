@@ -22,15 +22,12 @@ void text_draw(int32_t x_q4, int y, const char *s, uint32_t rgba)
         /* Interleaved: (row * W + col) * 4 + sp. Each glyph's bitmap
          * is exactly font_main.height rows, aligned to the line top. */
         static uint8_t scratch[256];
-        for (int r = 0; r < H; r++) {
-            const uint8_t *src = base + (size_t)r * W;
-            int row_any = 0;
-            for (int c = 0; c < W; c++) {
-                scratch[c] = src[c];
-                if (scratch[c]) row_any = 1;
-            }
-            if (row_any) gfx_blit_glyph(xp, y + r, W, 1, scratch, rgba);
+        int any = 0;
+        for (int i = 0; i < H * W && i < (int)sizeof(scratch); i++) {
+            scratch[i] = base[i];
+            if (scratch[i]) any = 1;
         }
+        if (any) gfx_blit_glyph(xp, y, W, H, scratch, rgba);
         x_q4 += g->advance;
     }
 }

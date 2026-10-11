@@ -18,12 +18,15 @@ static uint32_t value_color(const char *v)
 static void status_row(int row, const char *label, const char *value)
 {
     uint32_t vc = value ? value_color(value) : theme_current.fg;
+    frame_row_clear(row);
     frame_row_2col(row, label ? label : "", value, theme_current.fg, vc);
 }
 
 static void boot_status_begin(const char *entry_name)
 {
-    frame_begin(theme_current.header);
+    frame_title(theme_current.header);
+    frame_content_clear();
+
     char buf[128];
     int i = 0;
     const char *pre = "Booting: ";

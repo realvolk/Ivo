@@ -62,6 +62,7 @@ int   boot_entry(boot_context_t *ctx, entry_t *entry);
 void  con_clear(void);
 void  con_puts(const char *str);
 void  con_putc(char c);
+void  con_clear_row(void);
 void  con_set_fg(uint32_t rgba);
 int   con_read_secret(const char *label, char *out, size_t max_len, char echo);
 

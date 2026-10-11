@@ -4,6 +4,7 @@
 #include "ui/theme.h"
 #include "security/secure_boot.h"
 #include "ui/gfx.h"
+#include "ui/text.h"
 extern int luks_enabled(boot_context_t *ctx);
 extern int luks_unlock(boot_context_t *ctx);
 #ifdef LVM
@@ -146,11 +147,31 @@ extern void luks_wipe_keys(void);
 void panic(const char *msg)
 {
     con_clear();
-    con_set_fg(theme_current.error_fg);
-    con_puts("Ivo: Fatal error\n");
-    con_set_fg(theme_current.fg);
-    con_puts(msg);
-    con_puts("\n\nSystem halted.");
     luks_wipe_keys();
+
+    const char *l1 = "Ivo: Fatal error";
+    const char *l2 = msg ? msg : "";
+    const char *l3 = "System halted.";
+
+    int W   = gfx_width();
+    int H   = gfx_height();
+    int lh  = text_height();
+    int gap = lh;
+
+    int total_h = 3 * lh + gap;
+    int y0 = (H - total_h) / 2;
+    if (y0 < 0) y0 = 0;
+
+    int w1 = text_width(l1);
+    int w2 = text_width(l2);
+    int w3 = text_width(l3);
+
+    text_draw(((W - w1) / 2) << 2, y0,
+              l1, theme_current.error_fg);
+    text_draw(((W - w2) / 2) << 2, y0 + lh,
+              l2, theme_current.fg);
+    text_draw(((W - w3) / 2) << 2, y0 + 2 * lh + gap,
+              l3, theme_current.fg);
+
     halt();
 }

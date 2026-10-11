@@ -19,6 +19,8 @@ void gfx_vgradient(int x, int y, int w, int h, uint32_t top, uint32_t bot);
 void gfx_hline(int x, int y, int w, uint32_t rgba);
 void gfx_vline(int x, int y, int h, uint32_t rgba);
 void gfx_rounded_rect(int x, int y, int w, int h, int radius, uint32_t rgba);
+void gfx_rounded_rect_erase_gaps(int x, int y, int w, int h,
+                                 int radius, uint32_t behind);
 void gfx_blit_glyph(int x, int y, int w, int h, const uint8_t *cov, uint32_t rgba);
 
 #endif

@@ -259,7 +259,8 @@ void shell_enter(boot_context_t *ctx)
     char cmd[SHELL_MAX_CMD];
     int idx = 0;
 
-    con_puts("\nIvo Shell. 'help' for commands, 'exit' to return.\n");
+    con_clear();
+    con_puts("Ivo Shell. 'help' for commands, 'exit' to return.\n");
 
     while (1) {
         /* Redraw the prompt + typed line on every keystroke. Firmware
@@ -269,10 +270,7 @@ void shell_enter(boot_context_t *ctx)
         #define SHELL_REDRAW()                                                  \
             do {                                                                \
                 con_putc('\r');                                                 \
-                con_puts("> ");                                                 \
-                for (int _i = 0; _i < idx; _i++) con_putc(cmd[_i]);             \
-                for (int _i = 0; _i < 8; _i++) con_putc(' ');                   \
-                con_putc('\r');                                                 \
+                con_clear_row();                                                \
                 con_puts("> ");                                                 \
                 for (int _i = 0; _i < idx; _i++) con_putc(cmd[_i]);             \
             } while (0)

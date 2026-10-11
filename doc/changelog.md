@@ -1,5 +1,26 @@
 # Ivo Bootloader Changelog
 
+## v1.1.0 — 2026-10-12
+
+UI fixes.
+
+### Changed
+
+- Menu arrow-key redraw is two rows plus the footer, not the whole
+  screen. Panel background filled once, not twice. `gfx_fill_rect`,
+  `gfx_clear`, and `gfx_vgradient` use 64-bit stores. `gfx_blit_glyph`
+  fast-path for opaque coverage. `text_draw` blits one coverage buffer
+  per glyph instead of one per glyph row.
+- `con_clear` anchors to the top-left padding instead of screen
+  center-left. Shell and passphrase prompts are top-left. `panic`
+  block is centered on both axes.
+- Redrawn lines erase first: shell input, footer countdown, boot
+  progress values, LUKS/TPM prompt. No more ghost characters on
+  backspace or overlapped digits on the timeout.
+- Shell clears the screen on entry.
+- `con_putc(' ')` no longer relied on for erase (it advances the
+  cursor but paints nothing). `con_clear_row` added.
+
 ## v1.0.0 — 2026-10-09
 
 First stable release.

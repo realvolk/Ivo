@@ -56,8 +56,17 @@ static void draw_footer(int timeout, int remaining_s)
     }
     right[r] = '\0';
 
+    frame_row_clear_right(FRAME_ROWS - 1, 96);
+
     frame_row_2col(FRAME_ROWS - 1, left, right[0] ? right : 0,
                    theme_current.foot_fg, theme_current.foot_fg);
+}
+
+static void redraw_row(entry_t *entries, int row, int selected, entry_t *def)
+{
+    frame_row_clear(row);
+    entry_t *e = &entries[visible_idx[row]];
+    draw_entry(row, e, selected, e == def);
 }
 
 static void draw_menu(entry_t *entries, int selected,
@@ -117,7 +126,7 @@ entry_t *menu_select(boot_context_t *ctx)
                 int remaining = (timeout_ms - elapsed_ms + 999) / 1000;
                 if (remaining != last_shown_s) {
                     last_shown_s = remaining;
-                    draw_menu(entries, selected, def, timeout, remaining);
+                    draw_footer(timeout, remaining);
                 }
                 if (elapsed_ms >= timeout_ms)
                     return def ? def : &entries[visible_idx[0]];
@@ -139,6 +148,7 @@ entry_t *menu_select(boot_context_t *ctx)
         }
 
         if (c == (char)(0x80 | 0x48) || c == (char)(0x80 | 0x50)) {
+            int old = selected;
             if (c == (char)(0x80 | 0x48))
                 selected = (selected + visible_count - 1) % visible_count;
             else
@@ -147,7 +157,9 @@ entry_t *menu_select(boot_context_t *ctx)
             elapsed_ms = 0;
             last_shown_s = timeout;
             timeout_ms = timeout * 1000;
-            draw_menu(entries, selected, def, timeout, timeout);
+            redraw_row(entries, old, 0, def);
+            redraw_row(entries, selected, 1, def);
+            draw_footer(timeout, timeout);
             continue;
         }
 
