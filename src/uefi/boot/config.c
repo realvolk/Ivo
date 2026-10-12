@@ -8,6 +8,7 @@ void *mm_alloc(size_t size);
 #include "fs/fs.h"
 #include "security/secure_boot.h"
 #endif
+#include "security/password.h"
 
 /* Strict parser. The signing tool links this same file, so the
  * bootloader and ivo-sign can never disagree about what a config
@@ -31,6 +32,8 @@ static entry_t entries[MAX_ENTRIES];
 static int entry_count;
 static char default_name[MAX_PATH];
 static int timeout_sec;
+static int version_sec;
+static int version_given;
 static int error_line;
 
 static char *dup_str(const char *s)
@@ -127,6 +130,7 @@ static int parse_entry_key(entry_t *e, const char *key, char *raw)
 {
     char **str_field = 0;
     int is_hash = 0;
+    int is_pw   = 0;
 
     if      (strcmp(key, "kernel")    == 0) str_field = &e->kernel_path;
     else if (strcmp(key, "subvol")    == 0) str_field = &e->subvol;
@@ -137,12 +141,14 @@ static int parse_entry_key(entry_t *e, const char *key, char *raw)
     else if (strcmp(key, "kver")      == 0) { str_field = &e->kernel_hash;    is_hash = 1; }
     else if (strcmp(key, "iver")      == 0) { str_field = &e->initrd_hash;    is_hash = 1; }
     else if (strcmp(key, "cver")      == 0) { str_field = &e->chainload_hash; is_hash = 1; }
+    else if (strcmp(key, "password_hash") == 0) { str_field = &e->password_hash; is_pw = 1; }
 
     if (str_field) {
         if (*str_field) return -1;
         char *v = parse_string(raw);
         if (!v) return -1;
         if (is_hash && !valid_hash(v)) return -1;
+        if (is_pw && !password_hash_valid(v)) return -1;
         *str_field = dup_str(v);
         return *str_field ? 0 : -1;
     }
@@ -157,6 +163,21 @@ static int parse_entry_key(entry_t *e, const char *key, char *raw)
         else return -1;
         e->has_type = 1;
         return 0;
+    }
+    if (strcmp(key, "if") == 0) {
+        /* Only "exists(/path)" is recognised. Everything else is
+         * refused: this parser does not guess. */
+        if (e->if_exists_path) return -1;
+        char *v = parse_string(raw);
+        if (!v) return -1;
+        if (strncmp(v, "exists(", 7) != 0) return -1;
+        size_t n = strlen(v);
+        if (n < 9 || v[n - 1] != ')') return -1;
+        v[n - 1] = '\0';
+        char *path = v + 7;
+        if (path[0] != '/') return -1;
+        e->if_exists_path = dup_str(path);
+        return e->if_exists_path ? 0 : -1;
     }
     if (strcmp(key, "hidden") == 0) {
         if (e->hidden >= 0) return -1;
@@ -189,6 +210,8 @@ int config_parse(const char *data, size_t len)
 {
     entry_count = 0;
     timeout_sec = 5;
+    version_sec = 0;
+    version_given = 0;
     default_name[0] = '\0';
     error_line = 0;
 
@@ -254,6 +277,10 @@ int config_parse(const char *data, size_t len)
             char *v = parse_string(raw);
             if (!v || strlen(v) >= MAX_PATH) return -1;
             memcpy(default_name, v, strlen(v) + 1);
+        } else if (strcmp(key, "version") == 0) {
+            if (version_given++) return -1;
+            /* uint, capped to keep the efivar encoding simple. */
+            if (parse_uint(raw, 0x7FFFFFFF, &version_sec) != 0) return -1;
         } else {
             return -1;
         }
@@ -316,4 +343,11 @@ entry_t *config_get_default(void)
 int config_get_timeout(void)
 {
     return timeout_sec;
+}
+
+/* -1 when the config has no version key. A config without a version
+ * does not participate in rollback protection. */
+int config_get_version(void)
+{
+    return version_given ? version_sec : -1;
 }

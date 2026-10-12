@@ -102,7 +102,8 @@ TOOL_CFLAGS = -O2 -Wall -Wextra -DCONFIG_HOST \
               -I$(TOOLS_DIR) -Isrc/uefi -Isrc/uefi/boot -Isrc/uefi/crypto \
               -Isrc/uefi/fs -Isrc/uefi/security
 TOOL_UTIL   = $(TOOLS_DIR)/ivo-util.c $(TOOLS_DIR)/ivo-util.h \
-              src/uefi/crypto/sha512.c
+              src/uefi/crypto/sha512.c \
+              src/uefi/security/password.c
 TOOL_CONFIG = src/uefi/boot/config.c src/uefi/boot/config.h
 TOOL_ED25519 = src/uefi/crypto/ed25519.h src/uefi/crypto/fe.c \
                src/uefi/crypto/ge.c src/uefi/crypto/sc.c
@@ -134,6 +135,11 @@ $(TOOLS_DIR)/ivo-keygen: $(TOOLS_DIR)/ivo-keygen.c \
                            src/uefi/crypto/ed25519_seed.c \
                            src/uefi/crypto/ed25519_sign.c \
                            src/uefi/crypto/ed25519_verify.c \
+                           src/uefi/crypto/pbkdf2.c \
+                           src/uefi/crypto/hmac.c \
+                           src/uefi/crypto/hmac_sha1.c \
+                           src/uefi/crypto/sha1.c \
+                           src/uefi/crypto/sha256.c \
                            $(TOOL_ED25519) $(TOOL_UTIL)
 	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
 

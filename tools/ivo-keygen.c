@@ -25,10 +25,16 @@
 #include "ed25519.h"
 #include "wipe.h"
 #include "ivo-util.h"
+#include "crypto/pbkdf2.h"
 
+#include <termios.h>
+#include <unistd.h>
+#include <sys/random.h>
 static void usage(void)
 {
-    fprintf(stderr, "usage: ivo-keygen --out-prefix DIR/NAME [--force]\n");
+    fprintf(stderr,
+            "usage: ivo-keygen --out-prefix DIR/NAME [--force]\n"
+            "       ivo-keygen --password-hash [--iterations N]\n");
 }
 
 static char *with_suffix(const char *prefix, const char *suffix)
@@ -41,8 +47,101 @@ static char *with_suffix(const char *prefix, const char *suffix)
     return p;
 }
 
+/* Read a line from stdin without echo. Returns length, or -1 on
+ * error. Strips the trailing newline. */
+static int read_password_line(char *buf, size_t cap)
+{
+    if (!isatty(STDIN_FILENO)) {
+        if (!fgets(buf, (int)cap, stdin)) return -1;
+        size_t n = strlen(buf);
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = 0;
+        return (int)n;
+    }
+
+    struct termios old, raw;
+    if (tcgetattr(STDIN_FILENO, &old) != 0) return -1;
+    raw = old;
+    raw.c_lflag &= ~(tcflag_t)ECHO;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) return -1;
+
+    int rc = -1;
+    size_t n = 0;
+    for (;;) {
+        char c;
+        ssize_t r = read(STDIN_FILENO, &c, 1);
+        if (r <= 0) goto out;
+        if (c == '\n') break;
+        if (n + 1 < cap) buf[n++] = c;
+    }
+    buf[n] = 0;
+    rc = (int)n;
+out:
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &old);
+    fputc('\n', stderr);
+    return rc;
+}
+
+static int password_hash_mode(int argc, char **argv)
+{
+    int iter = 200000;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--iterations") == 0 && i + 1 < argc) {
+            iter = atoi(argv[++i]);
+            if (iter < 10000 || iter > 10000000) {
+                fprintf(stderr, "ivo-keygen: iterations out of range\n");
+                return 1;
+            }
+        } else {
+            fprintf(stderr, "ivo-keygen: unknown --password-hash arg: %s\n",
+                    argv[i]);
+            return 1;
+        }
+    }
+
+    char pass[256];
+    fprintf(stderr, "Password: ");
+    int n = read_password_line(pass, sizeof(pass));
+    if (n <= 0) {
+        fprintf(stderr, "ivo-keygen: empty or unreadable password\n");
+        return 1;
+    }
+
+    uint8_t salt[16];
+    {
+        ssize_t r = getrandom(salt, sizeof(salt), 0);
+        if (r != (ssize_t)sizeof(salt)) {
+            fprintf(stderr, "ivo-keygen: entropy source failed\n");
+            ivo_wipe(pass, sizeof(pass));
+            return 1;
+        }
+    }
+
+    uint8_t hash[32];
+    if (pbkdf2_hmac_sha256((const uint8_t *)pass, (size_t)n,
+                           salt, sizeof(salt), (uint32_t)iter,
+                           hash, sizeof(hash)) != 0) {
+        fprintf(stderr, "ivo-keygen: pbkdf2 failed\n");
+        ivo_wipe(pass, sizeof(pass));
+        return 1;
+    }
+    ivo_wipe(pass, sizeof(pass));
+
+    printf("pbkdf2-sha256:%d:", iter);
+    for (size_t i = 0; i < sizeof(salt); i++) printf("%02x", salt[i]);
+    printf(":");
+    for (size_t i = 0; i < sizeof(hash); i++) printf("%02x", hash[i]);
+    printf("\n");
+
+    ivo_wipe(salt, sizeof(salt));
+    ivo_wipe(hash, sizeof(hash));
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc >= 2 && strcmp(argv[1], "--password-hash") == 0)
+        return password_hash_mode(argc - 2, argv + 2);
+
     const char *prefix = NULL;
     int force = 0;
 

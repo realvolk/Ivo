@@ -13,13 +13,6 @@ comments are the truth.
 QEMU covers the rest: stock Arch OVMF, and a debug OVMF with
 SB + SMM + TPM.
 
-## BIOS was dropped
-
-Two boot paths meant two HALs, two boot-protocol stacks, two sets of
-firmware quirks, and two of everything above them. Every change tested
-twice, and the BIOS side was the fragile one. Smaller code, half the
-testing. UEFI only; legacy hardware has GRUB.
-
 ## Build
 
 Feature flags must reach `CFLAGS_EFI`. `LUKS=1` also enables the
@@ -130,6 +123,29 @@ Procedure in `doc/tpm.md`. The parts not there:
   the next start won't see the primary.
 - Verify the same blob unseals on host and in guest before trusting
   the enrollment.
+
+## Per-entry password hashes
+
+`password_hash` in an entry accepts one format:
+
+    pbkdf2-sha256:<iterations>:<salt-hex-32>:<hash-hex-64>
+
+Salt is 16 bytes, hash is 32. Per-entry, random. The string is part
+of the signed config, so it is authenticated by ivo-sign.
+
+Generate one:
+
+    tools/ivo-keygen --password-hash
+    # Password: <type, no echo>
+    # pbkdf2-sha256:200000:<hex>:<hex>
+
+Drop the output into the entry. Rehash + re-sign the config the
+usual way. The prompt is required before booting or before the
+cmdline editor; once proven in a boot the entry stays unlocked for
+that boot.
+
+Text mode uses the same hash and the same prompt. Nothing else
+changes.
 
 ## Test image
 

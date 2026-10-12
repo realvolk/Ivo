@@ -1,5 +1,54 @@
 # Ivo Bootloader Changelog
 
+## v1.1.1 — 2026-10-12
+
+New features! (+ Bug fixes)
+
+### Added
+
+- UEFI variable namespace for Ivo's own state, under a dedicated
+  vendor GUID. `Ivo/BootCount` written on each boot, cleared on
+  successful kernel handoff. `Ivo/LastEntry` written when an entry
+  is chosen with Enter or a number key, read on menu entry to
+  preselect that entry.
+- Rollback protection for `config.toml`: a top-level `version = N`
+  key is compared against `Ivo/ConfigVer` on every load; a config
+  older than the last accepted version refuses to boot. Configs
+  without a `version` key are unchanged. Best-effort: the variable
+  can be deleted by anything with ESP write access. A TPM NV
+  counter would be the real fix.
+- Conditional entries: `if = "exists(/path)"` on an entry hides it
+  from the menu when the path is not present on the mounted
+  filesystem.
+- Kernel cmdline editor (`e` on a menu entry). In-memory edit only;
+  the config on disk is not touched. Gated on the user having
+  proven the LUKS passphrase this boot, so a TPM-sealed unlock
+  cannot be bypassed into a shell.
+- Text-mode fallback when no usable GOP framebuffer is present. Uses
+  the firmware's ConOut/ConIn directly: numbered menu, plain
+  passphrase prompt, no theme, no panel. No timeout in text mode.
+- Per-entry password protection: `password_hash = "pbkdf2-sha256:..."`
+  in an entry. PBKDF2-HMAC-SHA256, per-entry random salt, verified
+  before boot and before the cmdline editor. Once proven in a boot,
+  the entry is unlocked for the rest of that boot.
+- `ivo-keygen --password-hash` produces a `password_hash` string
+  from a passphrase typed at the terminal.
+
+### Changed
+
+- `fs_write` refuses any path except `/EFI/ivo/sealed.bin`. The
+  bootloader no longer has a general-purpose write path.
+
+### Fixed
+
+- `RT_SetVariable` was read from the RuntimeServices vtable at the
+  wrong offset (0x50, which is `GetNextVariableName`; `SetVariable`
+  is at 0x58).
+  `Ivo/BootCount`, `Ivo/LastEntry`, and `Ivo/ConfigVer` now
+  actually survive across boots.
+- `ivo-sign --hash` prompts to bump the config version before
+  rewriting. `--no-bump` skips the prompt.
+
 ## v1.1.0 — 2026-10-12
 
 UI fixes.

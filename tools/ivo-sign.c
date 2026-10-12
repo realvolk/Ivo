@@ -66,6 +66,7 @@ typedef struct {
     iso_image_t isos[MAX_ISOS];
     int         n_isos;
     int         verbose;
+    int         no_bump;
 } opts_t;
 
 /* A private copy of a parsed entry. config.c keeps its results in
@@ -307,6 +308,20 @@ static line_t *split_lines(const char *d, size_t n, int *count)
     return v;
 }
 
+static int is_version_line(const line_t *l)
+{
+    if (l->section != -1) return 0;
+    if (l->kind != LINE_KEY) return 0;
+    const char *p = l->start;
+    const char *e = l->start + l->len;
+    while (p < e && (*p == ' ' || *p == '\t')) p++;
+    if (e - p < 7) return 0;
+    if (memcmp(p, "version", 7) != 0) return 0;
+    p += 7;
+    while (p < e && (*p == ' ' || *p == '\t')) p++;
+    return p < e && *p == '=';
+}
+
 static int do_hash(const char *cfg_path, const opts_t *o)
 {
     uint8_t *cfg = NULL;
@@ -367,6 +382,22 @@ static int do_hash(const char *cfg_path, const opts_t *o)
         return 0;
     }
 
+    int old_ver = config_get_version();
+    int bump = 0;
+    if (!o->no_bump) {
+        if (isatty(STDIN_FILENO)) {
+            fprintf(stderr, "bump config version %d -> %d? [Y/n] ",
+                    old_ver, old_ver + 1);
+            fflush(stderr);
+            char ans[8];
+            if (!fgets(ans, sizeof(ans), stdin) ||
+                (ans[0] != 'n' && ans[0] != 'N'))
+                bump = 1;
+        } else {
+            bump = 1;
+        }
+    }
+
     /* Rewrite: drop every kver/iver/cver line inside an entry, insert
      * fresh ones after the entry's last key line. Everything else is
      * copied byte for byte. */
@@ -385,9 +416,12 @@ static int do_hash(const char *cfg_path, const opts_t *o)
     }
 
     ivo_buf_t out = {0};
+    if (bump)
+        ivo_buf_printf(&out, "version = %d\n", old_ver + 1);
     for (int li = 0; li < nl_count; li++) {
         const line_t *l = &lines[li];
         if (l->kind == LINE_HASHKEY) continue;
+        if (bump && is_version_line(l)) continue;
         ivo_buf_append(&out, l->start, l->full);
 
         int sec = l->section;
@@ -420,6 +454,8 @@ static int do_hash(const char *cfg_path, const opts_t *o)
     } else {
         int n2 = 0;
         entry_t *e = config_get_entries(&n2);
+        if (bump && config_get_version() != old_ver + 1)
+            ok = 0;
         if (n2 != n) ok = 0;
         for (int i = 0; ok && i < n; i++) {
             ok = str_eq(e[i].name, s[i].name) &&
@@ -775,7 +811,8 @@ static void usage(void)
         "  --subvol-root DIR  btrfs top level (subvolid=5) for entries with\n"
         "                     subvol; default --root\n"
         "  --iso IMG          ISO image for iso-boot entries, matched by\n"
-        "                     volume label against iso_label\n");
+        "                     volume label against iso_label\n"
+        "  --no-bump          do not prompt to bump the config version\n");
 }
 
 int main(int argc, char **argv)
@@ -805,6 +842,7 @@ int main(int argc, char **argv)
             mode = m;
         }
         else if (strcmp(a, "-v") == 0) o.verbose = 1;
+        else if (strcmp(a, "--no-bump") == 0) o.no_bump = 1;
         else if (strcmp(a, "--config") == 0 && has_val) cfg = argv[++i];
         else if (strcmp(a, "--root") == 0 && has_val) o.root = argv[++i];
         else if (strcmp(a, "--subvol-root") == 0 && has_val) o.subvol_root = argv[++i];

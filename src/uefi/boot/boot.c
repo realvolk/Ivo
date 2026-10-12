@@ -6,6 +6,8 @@
 #include "ui/text.h"
 #include "ui/frame.h"
 #include "storage/luks.h"
+#include "security/efivars.h"
+#include "security/password.h"
 
 static uint32_t value_color(const char *v)
 {
@@ -181,6 +183,7 @@ static int boot_chainload(entry_t *entry)
     con_puts("OK\nStarting ");
     con_puts(entry->chainload_path);
     con_puts("...\n");
+    ivo_bootcount_clear();
     luks_wipe_keys();
     hal_chainload(buf, efi_size);
     con_puts("Chainloaded image returned. Rebooting.\n");
@@ -217,6 +220,10 @@ static int prepare_entry(boot_context_t *ctx, entry_t *entry)
 
 int boot_entry(boot_context_t *ctx, entry_t *entry)
 {
+    if (entry_password_check(entry) != 0) {
+        return 0;
+    }
+
     boot_status_begin(entry->name);
 #ifdef SECURE_BOOT
     if (!config_entry_hashes_complete(entry))
@@ -236,6 +243,11 @@ int boot_entry(boot_context_t *ctx, entry_t *entry)
         tpm_measure_string(TPM_PCR_CMDLINE, entry->cmdline);
 
     status_row(11, "Handing off to kernel...", 0);
+    /* Clear the failed-boot counter only here, after everything that
+     * can fail has already succeeded. If the kernel handoff itself
+     * fails, or the machine loses power, the counter stays set and
+     * the next boot knows something went wrong. */
+    ivo_bootcount_clear();
     luks_wipe_keys();
     hal_boot_uefi(entry->kernel, entry->kernel_size,
                   entry->cmdline,

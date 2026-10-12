@@ -3,6 +3,7 @@
 #include "ui/gfx.h"
 #include "ui/text.h"
 #include "security/wipe.h"
+#include "hal/hal.h"
 
 static int g_cx, g_cy;
 static uint32_t g_fg;
@@ -40,6 +41,16 @@ static void scroll_up(int pixels)
 
 void con_clear(void)
 {
+    if (gfx_text_mode()) {
+        for (int i = 0; i < 3; i++) {
+            hal_putchar('\r');
+            hal_putchar('\n');
+        }
+        g_cx = 0;
+        g_cy = 0;
+        return;
+    }
+    /* Text mode behaves differently.. annoyingly */
     gfx_clear(theme_current.bg);
     g_cx = pad();
     g_cy = pad();
@@ -51,8 +62,18 @@ void con_set_fg(uint32_t rgba)
     g_fg = rgba;
 }
 
+void con_set_pos(int x, int y)
+{
+    g_cx = x;
+    g_cy = y;
+}
+
 void con_putc(char c)
 {
+    if (gfx_text_mode()) {
+        hal_putchar(c);
+        return;
+    }
     if (!gfx_available()) return;
     int lh = text_height();
     int W = gfx_width();
@@ -87,6 +108,10 @@ void con_puts(const char *s)
 
 void con_clear_row(void)
 {
+    if (gfx_text_mode()) {
+        hal_putchar('\n');
+        return;
+    }
     if (!gfx_available()) return;
     int W = gfx_width();
     int P = pad();
@@ -104,6 +129,39 @@ void halt(void)
 
 int con_read_secret(const char *label, char *out, size_t max_len, char echo)
 {
+    if (gfx_text_mode()) {
+        /* Text mode: label, then echo each character as typed (or
+         * as a mask), with \b \b to backspace. No framebuffer
+         * involved, so the console handles the cursor. */
+        con_puts(label);
+        con_puts(": ");
+
+        size_t idx = 0;
+        for (;;) {
+            char c = hal_getchar();
+            if (c == 0) continue;
+            if (c == '\r' || c == '\n') {
+                out[idx] = '\0';
+                con_puts("\n");
+                return (int)idx;
+            }
+            if (c == '\b' || c == 0x7F) {
+                if (idx > 0) { idx--; con_puts("\b \b"); }
+                continue;
+            }
+            if ((uint8_t)c == HAL_KEY_NON_ASCII) {
+                ivo_wipe(out, max_len);
+                con_puts("\nNon-ASCII characters are not supported here.\n");
+                return -1;
+            }
+            if (c < 0x20 || c > 0x7E) continue;
+            if (idx + 1 < max_len) {
+                out[idx++] = c;
+                con_putc(echo);
+            }
+        }
+    }
+
     con_clear();
     int lh = text_height();
     int P  = pad();

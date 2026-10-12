@@ -5,6 +5,7 @@
 #include "security/secure_boot.h"
 #include "ui/gfx.h"
 #include "ui/text.h"
+#include "security/efivars.h"
 extern int luks_enabled(boot_context_t *ctx);
 extern int luks_unlock(boot_context_t *ctx);
 #ifdef LVM
@@ -35,13 +36,15 @@ void ivo_main(boot_context_t *ctx)
     stack_chk_init();
     hal_init(ctx);
     if (gfx_init() != 0) {
-        hal_puts_serial("Ivo: no usable GOP framebuffer; halting\n");
-        halt();
+        gfx_force_text_mode();
+        hal_puts_serial("Ivo: no usable GOP framebuffer; text mode\n");
     }
     frame_init();
     con_clear();
     mm_init(ctx);
     tpm_init();
+    int bc = ivo_bootcount_get();
+    ivo_bootcount_set(bc + 1);
 
     /* No self-measurement: firmware already measured ivo.efi into
      * PCR 4 when it loaded it. Hashing the in-memory image would mix
@@ -104,6 +107,7 @@ void ivo_main(boot_context_t *ctx)
         panic("no mountable filesystem found");
     }
 #endif
+    con_clear();
 
     int cfg_rc = config_load(ctx);
     if (cfg_rc == CONFIG_ERR_SIGNATURE) {
@@ -119,6 +123,20 @@ void ivo_main(boot_context_t *ctx)
         con_puts("Type 'help' for commands. 'halt' to stop.\n\n");
         shell_enter(ctx);
         halt();
+    }
+
+    /* Rollback protection: refuse a config older than the last one we
+     * accepted. Best-effort; the efivar can be deleted by anyone with
+     * ESP write access, which resets the check. See doc/security.md. */
+    {
+        int cv = config_get_version();      /* -1 if no version key */
+        if (cv >= 0) {
+            int stored = ivo_configver_get();
+            if (stored >= 0 && cv < stored)
+                panic("config.toml version is older than the last accepted one");
+            if (cv > stored)
+                ivo_configver_set(cv);
+        }
     }
 
     for (;;) {
@@ -146,8 +164,17 @@ extern void luks_wipe_keys(void);
 
 void panic(const char *msg)
 {
-    con_clear();
     luks_wipe_keys();
+
+    if (gfx_text_mode()) {
+        con_clear();
+        con_puts("Ivo: Fatal error\n");
+        con_puts(msg ? msg : "");
+        con_puts("\n\nSystem halted.\n");
+        halt();
+    }
+
+    con_clear();
 
     const char *l1 = "Ivo: Fatal error";
     const char *l2 = msg ? msg : "";

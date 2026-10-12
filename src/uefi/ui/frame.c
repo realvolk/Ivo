@@ -45,6 +45,8 @@ void frame_title(const char *title)
 
 void frame_begin(const char *title)
 {
+    if (gfx_text_mode()) return;
+    /* Because someone will eventually complain the GOP doesn't work */
     gfx_fill_rect(g_px, g_py, g_pw, g_ph, theme_current.bg);
 
     int r = theme_current.corner_radius;

@@ -26,8 +26,11 @@ typedef struct {
     char     *subvol;
     char     *initrd_hash;
     char     *chainload_hash;
+    char     *if_exists_path;  /* from `if = "exists(/path)"`, or NULL */
+    char     *password_hash;   /* NULL = no password */
     int       hidden;       /* -1 while parsing = not given */
     int       timeout;      /* -1 = use global */
+    int       password_proven; /* runtime-only; set on successful prompt */
 } entry_t;
 
 /* config_load return codes besides 0. */
@@ -42,5 +45,10 @@ int      config_entry_hashes_complete(const entry_t *e);
 entry_t *config_get_entries(int *count);
 entry_t *config_get_default(void);
 int      config_get_timeout(void);
+
+/* Monotonic config version, from the top-level `version = N` key.
+ * Returns -1 when the key is absent; the config then does not
+ * participate in rollback protection. */
+int      config_get_version(void);
 
 #endif

@@ -84,9 +84,19 @@ int fs_readdir(void *handle, char *name, size_t name_len)
     return fs_current->readdir(handle, name, name_len);
 }
 
+/* Only /EFI/ivo/sealed.bin may be written, and only by the TPM
+ * enrollment path. Any other write is a bug: the ESP is plaintext
+ * and shared with the OS, so a wrong path is a self-tamper bug.
+ * Add here explicitly if a second write path is ever needed. */
+static int path_is_writable(const char *path)
+{
+    return path && strcmp(path, "/EFI/ivo/sealed.bin") == 0;
+}
+
 int fs_write(const char *path, const uint8_t *data, size_t size)
 {
     if (!fs_current) return -1;
+    if (!path_is_writable(path)) return -1;
     return fs_current->write(path, data, size);
 }
 

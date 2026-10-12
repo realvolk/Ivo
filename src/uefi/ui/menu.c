@@ -3,18 +3,33 @@
 #include "ui/gfx.h"
 #include "ui/text.h"
 #include "ui/frame.h"
+#include "security/efivars.h"
+#include "security/password.h"
 
-#define MENU_MAX_VISIBLE 16
+#define MENU_MAX_VISIBLE  16
+#define CMDLINE_EDIT_MAX  256
 
 static int visible_idx[MENU_MAX_VISIBLE];
 static int visible_count;
 
+/* An entry with no `if` is always visible. An entry with
+ * `if = "exists(/path)"` is visible only when the path exists on the
+ * currently-mounted filesystem. */
+static int entry_predicate_ok(const entry_t *e)
+{
+    if (!e->if_exists_path) return 1;
+    size_t sz = 0;
+    return fs_stat(e->if_exists_path, &sz) == 0;
+}
+
 static void build_visible(entry_t *entries, int count)
 {
     visible_count = 0;
-    for (int i = 0; i < count && visible_count < MENU_MAX_VISIBLE; i++)
-        if (!entries[i].hidden)
-            visible_idx[visible_count++] = i;
+    for (int i = 0; i < count && visible_count < MENU_MAX_VISIBLE; i++) {
+        if (entries[i].hidden) continue;
+        if (!entry_predicate_ok(&entries[i])) continue;
+        visible_idx[visible_count++] = i;
+    }
 }
 
 static void draw_entry(int row, entry_t *e, int selected, int is_default)
@@ -90,6 +105,188 @@ static int entry_timeout(entry_t *e)
     return config_get_timeout();
 }
 
+/* Replace an entry's cmdline with a fresh allocation. The old one,
+ * if any, is freed. mm_alloc failure leaves the entry without a
+ * cmdline; the boot path handles that. */
+static void set_cmdline(entry_t *e, const char *s)
+{
+    if (e->cmdline) mm_free(e->cmdline);
+    size_t n = strlen(s);
+    char *p = mm_alloc(n + 1);
+    if (p) memcpy(p, s, n + 1);
+    e->cmdline = p;
+}
+
+/* Single-line editor. Draws a header and an input line at the
+ * top-left of the screen, using the console primitives. Redraws only
+ * the input line on each keystroke, not the whole screen.
+ *
+ *   Enter    save and return to the menu
+ *   Esc      cancel, discard
+ *   Backspace / DEL   delete last character */
+static void cmdline_editor(entry_t *e)
+{
+    int lh = text_height();
+    int P  = theme_current.padding;
+
+    con_clear();
+    con_puts("Editing cmdline for: ");
+    con_puts(e->name);
+    con_puts("\n\n> ");
+
+    int input_x = P + text_width("> ");
+    int input_y = P + 2 * lh;
+
+    char buf[CMDLINE_EDIT_MAX];
+    size_t len = 0;
+    if (e->cmdline) {
+        size_t n = strlen(e->cmdline);
+        if (n >= sizeof(buf)) n = sizeof(buf) - 1;
+        memcpy(buf, e->cmdline, n);
+        len = n;
+    }
+
+    /* Draw the initial buffer and cursor. */
+    for (size_t i = 0; i < len; i++) con_putc(buf[i]);
+    con_putc('_');
+
+    con_puts("\n\nEnter: save   Esc: cancel\n");
+
+    for (;;) {
+        char c = hal_getchar();
+        if (c == 0) continue;
+
+        if (c == '\r' || c == '\n') {
+            buf[len] = '\0';
+            set_cmdline(e, buf);
+            con_clear();
+            return;
+        }
+        if (c == 0x1B) {
+            con_clear();
+            return;
+        }
+
+        if (c == '\b' || c == 0x7F) {
+            if (len > 0) len--;
+        } else if (c >= 0x20 && c <= 0x7E) {
+            if (len + 1 < sizeof(buf)) buf[len++] = c;
+        } else {
+            continue;
+        }
+
+        /* Redraw the input line only. */
+        con_set_pos(input_x, input_y);
+        con_clear_row();
+        for (size_t i = 0; i < len; i++) con_putc(buf[i]);
+        con_putc('_');
+    }
+}
+
+/* Text-mode menu. Numbered list on one screen, one number prompt.
+ * No framebuffer, no theme, no redraw. Called only when GOP is
+ * unavailable. */
+static entry_t *menu_select_text(boot_context_t *ctx, entry_t *entries)
+{
+    (void)ctx;
+
+    /* Preselect: LastEntry, then default, then first. */
+    entry_t *def = config_get_default();
+    int selected = -1;
+    char last[IVO_LASTENTRY_MAX];
+    if (ivo_lastentry_get(last, sizeof(last)) == 0) {
+        for (int i = 0; i < visible_count; i++) {
+            if (strcmp(entries[visible_idx[i]].name, last) == 0) {
+                selected = i;
+                break;
+            }
+        }
+    }
+    if (selected < 0 && def) {
+        for (int i = 0; i < visible_count; i++)
+            if (&entries[visible_idx[i]] == def) { selected = i; break; }
+    }
+    if (selected < 0) selected = 0;
+
+    con_clear();
+    con_puts("Ivo: text mode (no usable framebuffer)\n\n");
+    for (int i = 0; i < visible_count; i++) {
+        char num[4];
+        int n = i + 1;
+        num[0] = (char)('0' + n);
+        num[1] = ')';
+        num[2] = ' ';
+        num[3] = '\0';
+        con_puts(num);
+        con_puts(entries[visible_idx[i]].name);
+        if (&entries[visible_idx[i]] == def) con_puts(" (default)");
+        con_puts("\n");
+    }
+    con_puts("\n");
+
+    int timeout = 0;
+    if (timeout > 0) {
+        char prompt[32] = "Choose [default, ";
+        int n = timeout;
+        char digits[8];
+        int di = 0;
+        if (n == 0) digits[di++] = '0';
+        while (n > 0) { digits[di++] = '0' + (n % 10); n /= 10; }
+        for (int a = 0, b = di - 1; a < b; a++, b--) {
+            char t = digits[a]; digits[a] = digits[b]; digits[b] = t;
+        }
+        char *p = prompt + strlen(prompt);
+        for (int k = 0; k < di; k++) *p++ = digits[k];
+        *p++ = 's';
+        *p++ = ']'; *p++ = ':'; *p++ = ' '; *p = '\0';
+        con_puts(prompt);
+    } else {
+        con_puts("Choose: ");
+    }
+
+    int elapsed_ms = 0;
+    int timeout_ms = timeout * 1000;
+    for (;;) {
+        int wait = 50;
+        if (timeout > 0 && timeout_ms - elapsed_ms < wait)
+            wait = timeout_ms - elapsed_ms;
+        if (wait < 1) wait = 1;
+
+        char c = hal_getchar_timeout(wait);
+        if (c == 0) {
+            elapsed_ms += wait;
+            if (timeout > 0 && elapsed_ms >= timeout_ms) {
+                con_puts("\n");
+                return def ? def : &entries[visible_idx[0]];
+            }
+            continue;
+        }
+
+        /* Echo the printable key so the user sees what they typed.
+         * Firmware ConOut does not echo ConIn on its own in text
+         * mode, so the bootloader has to. */
+        if (c >= 0x20 && c <= 0x7E)
+            con_putc(c);
+        if (c == '\r' || c == '\n') {
+            entry_t *chosen = &entries[visible_idx[selected]];
+            ivo_lastentry_set(chosen->name);
+            return chosen;
+        }
+        if (c == 'e') {
+            /* Cmdline editor is not available in text mode. */
+            continue;
+        }
+        if (c >= '1' && c <= '9') {
+            int idx = c - '1';
+            if (idx < visible_count) {
+                entry_t *chosen = &entries[visible_idx[idx]];
+                ivo_lastentry_set(chosen->name);
+                return chosen;
+            }
+        }
+    }
+}
+
 entry_t *menu_select(boot_context_t *ctx)
 {
     int count = 0;
@@ -98,12 +295,26 @@ entry_t *menu_select(boot_context_t *ctx)
     build_visible(entries, count);
     if (visible_count == 0) return 0;
 
+    if (gfx_text_mode())
+        return menu_select_text(ctx, entries);
+
     entry_t *def = config_get_default();
-    int selected = 0;
-    if (def) {
+    int selected = -1;
+
+    char last[IVO_LASTENTRY_MAX];
+    if (ivo_lastentry_get(last, sizeof(last)) == 0) {
+        for (int i = 0; i < visible_count; i++) {
+            if (strcmp(entries[visible_idx[i]].name, last) == 0) {
+                selected = i;
+                break;
+            }
+        }
+    }
+    if (selected < 0 && def) {
         for (int i = 0; i < visible_count; i++)
             if (&entries[visible_idx[i]] == def) { selected = i; break; }
     }
+    if (selected < 0) selected = 0;
 
     int timeout      = entry_timeout(&entries[visible_idx[selected]]);
     int elapsed_ms   = 0;
@@ -134,8 +345,11 @@ entry_t *menu_select(boot_context_t *ctx)
             continue;
         }
 
-        if (c == '\r' || c == '\n')
-            return &entries[visible_idx[selected]];
+        if (c == '\r' || c == '\n') {
+            entry_t *chosen = &entries[visible_idx[selected]];
+            ivo_lastentry_set(chosen->name);
+            return chosen;
+        }
 
         if (c == 0x1B) {
             shell_enter(ctx);
@@ -163,10 +377,37 @@ entry_t *menu_select(boot_context_t *ctx)
             continue;
         }
 
+        if (c == 'e') {
+            /* Refuse if the disk was unlocked from a TPM-sealed
+             * secret without the user proving the passphrase this
+             * boot. Otherwise a cmdline editor is a way to append
+             * init=/bin/bash and get root on the decrypted fs. */
+            if (core_unlocked_without_passphrase()) {
+                continue;
+            }
+            entry_t *e = &entries[visible_idx[selected]];
+            /* Same reason for password-protected entries. Go fuck
+            yourself if you edit this. */
+            if (entry_password_check(e) != 0) {
+                draw_menu(entries, selected, def, timeout, timeout);
+                continue;
+            }
+            cmdline_editor(e);
+            timeout      = entry_timeout(&entries[visible_idx[selected]]);
+            elapsed_ms   = 0;
+            last_shown_s = timeout;
+            timeout_ms   = timeout * 1000;
+            draw_menu(entries, selected, def, timeout, timeout);
+            continue;
+        }
+
         if (c >= '1' && c <= '9') {
             int idx = c - '1';
-            if (idx < visible_count)
-                return &entries[visible_idx[idx]];
+            if (idx < visible_count) {
+                entry_t *chosen = &entries[visible_idx[idx]];
+                ivo_lastentry_set(chosen->name);
+                return chosen;
+            }
         }
     }
 }

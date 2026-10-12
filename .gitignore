@@ -18,3 +18,4 @@ tests/btrfs-test
 tests/ed25519-test
 tests/sha512-test
 config.mk
+list.md

@@ -9,6 +9,10 @@
 
 int  gfx_init(void);
 int  gfx_available(void);
+/* 1 if Ivo is running without a usable GOP framebuffer and should
+ * use ConOut for all output. Set by ivo_main when gfx_init fails. */
+int  gfx_text_mode(void);
+void gfx_force_text_mode(void);
 int  gfx_width(void);
 int  gfx_height(void);
 

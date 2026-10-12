@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.0.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v1.1.1-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-CLEAR_v1-yellow?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/C-98%25-555555?style=flat-square&logo=c" alt="C">
   <img src="https://img.shields.io/badge/make-1%25-6E4C13?style=flat-square" alt="Make">
@@ -68,7 +68,12 @@ kernel directly.
 - LVM2 linear volumes
 - GPT partitions
 - TOML config, no scripting
+- Conditional entries (`if = "exists(/path)"`)
+- Per-entry password hashes (PBKDF2-HMAC-SHA256)
+- Kernel cmdline editor at boot
+- Text-mode fallback when GOP is unavailable
 - Ed25519-signed config, SHA-512-verified kernel/initrd/chainload
+- Best-effort rollback protection (`version` key vs UEFI variable)
 - Firmware Secure Boot (signed PE/COFF, `db`-enrolled)
 - Manual PE/COFF kernel handoff that bypasses `LoadImage`
 - Live ISO boot from a raw partition
@@ -84,7 +89,8 @@ kernel directly.
 - **`ivo-install`** — install to an ESP or a USB stick.
 - **`ivo-config`** — scan `/boot` and write a `config.toml`.
 - **`ivo-sign`** — hash, check, sign, verify a config.
-- **`ivo-keygen`** — Ed25519 keypair.
+- **`ivo-keygen`** — Ed25519 keypair; `--password-hash` for
+  per-entry passwords.
 - **`ivo-convert`** — GRUB, Limine, rEFInd → `config.toml`.
 - **`ivo-doctor`** — read-only diagnostic.
 
@@ -181,6 +187,7 @@ tools/ivo-sign --hash --config config.toml --root /boot
 ### Configuration
 
 ```toml
+version = 1
 timeout = 5
 default = "linux"
 
@@ -276,10 +283,14 @@ unlock, Ivo extends PCR 4 with a separator. A passphrase sealed to
 PCR 4 + 7 unseals only before the separator. Measurement is a record,
 not a gate.
 
-Not covered: no rollback protection for signed configs. Cold-boot and
-DMA attacks on DRAM are out of scope. Firmware-owned memory that Ivo
-does not clear survives handoff. So does the kernel's own in-memory
-copy of anything it later loads.
+Rollback protection for signed configs is best-effort: Ivo compares a
+`version` key in the config against a value stored in a UEFI variable,
+and refuses to boot an older config. Anyone with ESP write access can
+delete the variable and reset the check. A TPM NV counter is the real
+fix and is not implemented. Cold-boot and DMA attacks on DRAM are out
+of scope. Firmware-owned memory that Ivo does not clear survives
+handoff. So does the kernel's own in-memory copy of anything it later
+loads.
 
 The recovery shell (Esc) reads the boot filesystem. If the disk was
 unlocked from the TPM, it asks for the LUKS passphrase before any

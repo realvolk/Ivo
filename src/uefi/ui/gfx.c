@@ -25,7 +25,16 @@ int gfx_init(void)
     return 0;
 }
 
+static int g_text_mode;
+
 int gfx_available(void) { return g_ready; }
+int gfx_text_mode(void)  { return g_text_mode; }
+
+void gfx_force_text_mode(void)
+{
+    g_text_mode = 1;
+    g_ready = 0;
+}
 int gfx_width(void)     { return (int)g_fb.width; }
 int gfx_height(void)    { return (int)g_fb.height; }
 
