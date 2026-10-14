@@ -140,10 +140,17 @@ int tpm_seal_write_blob(const uint8_t *blob, size_t len)
     fs_driver_t *saved;
     size_t sz = 0;
     int rc = -1;
-    if (esp_open(&saved) != 0) return -1;
-    if (fs_stat(SEALED_PATH, &sz) != 0 &&
-        fs_write(SEALED_PATH, blob, len) == 0)
+    if (esp_open(&saved) != 0) {
+        hal_puts_serial("tpm enroll: esp_open failed\n");
+        return -1;
+    }
+    if (fs_stat(SEALED_PATH, &sz) == 0) {
+        hal_puts_serial("tpm enroll: sealed.bin exists, refusing\n");
+    } else if (fs_write(SEALED_PATH, blob, len) != 0) {
+        hal_puts_serial("tpm enroll: fs_write failed\n");
+    } else {
         rc = 0;
+    }
     esp_close(saved);
     return rc;
 }
@@ -154,14 +161,14 @@ static int confirm_seal(void)
     con_clear();
     con_puts(
         "TPM enrollment requested (/EFI/ivo/seal-request on the ESP).\n\n"
-        "The passphrase you just typed will be sealed to this machine's\n"
+        "The passphrase just entered will be sealed to this machine's\n"
         "TPM, bound to PCR 4 (firmware-measured boot loader) and PCR 7\n"
         "(Secure Boot state), and stored in /EFI/ivo/sealed.bin. Boots\n"
         "with the same firmware, ivo.efi and Secure Boot keys will then\n"
         "unlock this disk without the passphrase (or with a PIN only).\n\n"
         "The request file is on the unencrypted ESP: anyone who could\n"
-        "write to it can bring up this screen. If you did not ask for\n"
-        "this, do not continue.\n\n"
+        "write to it can bring up this screen. If this was not\n"
+        "requested, do not continue.\n\n"
         "Type seal and press Enter to continue; anything else skips: ");
 
     char buf[4];
@@ -239,18 +246,23 @@ int tpm_seal_maybe_enroll(boot_context_t *ctx)
         uint8_t blob[SEAL_MAX];
         size_t  blob_len = 0;
 
-        if (pin_len < 0)
+        if (pin_len < 0) {
             con_puts("TPM: PIN entry failed; not sealing.\n");
-        else if (tpm2_seal_create((const uint8_t *)pass, (size_t)n,
-                                  (const uint8_t *)pin, (size_t)pin_len,
-                                  SEAL_PCR_MASK,
-                                  blob, &blob_len, sizeof(blob)) != 0)
+            hal_puts_serial("tpm enroll: pin entry failed\n");
+        } else if (tpm2_seal_create((const uint8_t *)pass, (size_t)n,
+                                    (const uint8_t *)pin, (size_t)pin_len,
+                                    SEAL_PCR_MASK,
+                                    blob, &blob_len, sizeof(blob)) != 0) {
             con_puts("TPM: seal failed.\n");
-        else if (tpm_seal_write_blob(blob, blob_len) != 0)
+            hal_puts_serial("tpm enroll: seal failed\n");
+        } else if (tpm_seal_write_blob(blob, blob_len) != 0) {
             con_puts("TPM: could not write /EFI/ivo/sealed.bin.\n");
-        else
+            hal_puts_serial("tpm enroll: write failed\n");
+        } else {
             con_puts("Sealed to the TPM (PCR 4+7). Delete "
                      "/EFI/ivo/seal-request.\n");
+            hal_puts_serial("tpm enroll: sealed ok\n");
+        }
         ivo_wipe(pin, sizeof(pin));
     }
 

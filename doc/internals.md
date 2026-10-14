@@ -416,9 +416,23 @@ Direct CRB MMIO does not work under SMM. Reads return `0` or
 `0xFFFFFFFF`.
 
 `tpm_seal_create.c` handles the enrollment half: creates the SRK at
-`0x81000001` if it does not exist, builds the auth policy via a trial
-session, creates the sealed object, emits the blob. Enrollment
-triggered by a zero-byte `/EFI/ivo/seal-request` file on the ESP.
+`0x81000001` if it does not exist, opens a trial policy session, runs
+`PolicyPCR` [+ `PolicyPassword`], and reads the resulting digest via
+`PolicyGetDigest` (`0x00000189`, not the PCR_Read code). The digest is
+stored as the sealed object's `authPolicy` and passed to `Create`. The
+blob is written to `/EFI/ivo/sealed.bin` on the ESP.
+
+`tpm_cmd.c` handles the unseal half: `Load`, `StartAuthSession`,
+`PolicyPCR`, optional `PolicyPassword`, `Unseal`, `FlushContext`.
+Sessions are unsalted; parameters are not encrypted.
+
+Enrollment is triggered by a zero-byte `/EFI/ivo/seal-request` file on
+the ESP. `sealed.bin` is never overwritten, so re-enrollment requires
+deleting it first.
+
+Salted sessions with parameter encryption were attempted and removed.
+swtpm rejects the RSA-OAEP encrypted salt with `TPM_RC_VALUE | param 2`
+(`0x2C4`). See `doc/tpm.md` § "Salted sessions (not implemented)".
 
 ## Secure Boot
 
@@ -504,8 +518,12 @@ and the UEFI build ignored it.
 - Secure Boot: firmware Authenticode + Ed25519 config + per-entry
   SHA-512.
 - TPM measurement: PCRs 8, 9 via TCG2 under SMM, verified with swtpm.
-- TPM enrollment: `seal-request` trigger, blob written to the ESP,
-  prompt skipped on next boot.
+- TPM enrollment: `seal-request` trigger, SRK at `0x81000001`, policy
+  built in a trial session, blob written to the ESP.
+- TPM unseal: passphrase sealed to PCR 4+7 unseals at boot under
+  swtpm; wrong PCR state falls through to the LUKS prompt. Rebuilding
+  `ivo.efi` between enrollment and unseal invalidates the seal by
+  design.
 
 **Doesn't work.**
 
@@ -518,3 +536,9 @@ and the UEFI build ignored it.
 - LUKS1 backup header not read.
 - Rock Ridge: supported for reading, but POSIX metadata (permissions,
   symlinks) not applied.
+- TPM parameter encryption. Sessions are unsalted, so the PIN and the
+  unsealed secret cross the TPM bus in the clear. swtpm rejects the
+  salted `StartAuthSession`; see `doc/tpm.md`.
+- TPM NV counter. swtpm's libtpms does not preserve `TPMA_NV_COUNTER`,
+  so the rollback NV tier is untested under QEMU. Requires real
+  hardware.

@@ -23,13 +23,6 @@
 
 #define EFI_DEVICE_ERROR 0x8000000000000007ULL
 
-#define TPM_CC_LOAD               0x00000157u
-#define TPM_CC_START_AUTH_SESSION 0x00000176u
-#define TPM_CC_POLICY_PCR         0x0000017Fu
-#define TPM_CC_POLICY_PASSWORD    0x0000018Cu
-#define TPM_CC_UNSEAL             0x0000015Eu
-#define TPM_CC_FLUSH_CONTEXT      0x00000165u
-
 #define TPM_HDR_LEN 10
 
 /* Defined in tpm.c. */
@@ -98,6 +91,12 @@ static const uint8_t *tr_take(struct tpm_rd *r, size_t n)
     return p;
 }
 
+uint8_t tr_u8(struct tpm_rd *r)
+{
+    const uint8_t *p = tr_take(r, 1);
+    return p ? *p : 0;
+}
+
 uint16_t tr_u16(struct tpm_rd *r)
 {
     const uint8_t *p = tr_take(r, 2);
@@ -133,11 +132,34 @@ typedef EFI_STATUS (*efi_tcg2_submit_fn)(
     void *This, uint32_t in_size, uint8_t *in_buf,
     uint32_t out_size, uint8_t *out_buf);
 
+static uint32_t g_last_tpm_rc;
+
+uint32_t last_tpm_rc(void)
+{
+    return g_last_tpm_rc;
+}
+
 static void print_hex(uint64_t v, int digits)
 {
     const char *hex = "0123456789abcdef";
     for (int i = digits - 1; i >= 0; i--)
         con_putc(hex[(v >> (i * 4)) & 0xF]);
+}
+
+static void serial_err_hex(const char *what, uint32_t rc)
+{
+    static const char h[] = "0123456789abcdef";
+    char buf[64];
+    int i = 0;
+    buf[i++] = 't'; buf[i++] = 'p'; buf[i++] = 'm'; buf[i++] = ' ';
+    for (const char *p = what; *p && i < 48; p++) buf[i++] = *p;
+    buf[i++] = ' ';
+    buf[i++] = 'r'; buf[i++] = 'c'; buf[i++] = '=';
+    buf[i++] = '0'; buf[i++] = 'x';
+    for (int j = 7; j >= 0; j--) buf[i++] = h[(rc >> (j * 4)) & 0xF];
+    buf[i++] = '\n';
+    buf[i] = 0;
+    hal_puts_serial(buf);
 }
 
 int tpm_transact(struct tpm_wr *w, uint8_t *rsp, size_t rsp_cap,
@@ -159,9 +181,7 @@ int tpm_transact(struct tpm_wr *w, uint8_t *rsp, size_t rsp_cap,
     efi_tcg2_submit_fn fn = (efi_tcg2_submit_fn)((void **)g_tcg2)[3];
     EFI_STATUS s = fn(g_tcg2, n, w->buf, (uint32_t)rsp_cap, rsp);
     if (s != EFI_SUCCESS) {
-        con_puts("tpm submit rc=0x");
-        print_hex(s, 16);
-        con_puts("\n");
+        hal_puts_serial("tpm submit failed\n");
         return -1;
     }
 
@@ -169,6 +189,7 @@ int tpm_transact(struct tpm_wr *w, uint8_t *rsp, size_t rsp_cap,
                     ((uint32_t)rsp[4] << 8)  |  (uint32_t)rsp[5];
     if (size < TPM_HDR_LEN || size > rsp_cap) {
         con_puts("tpm: bad response size\n");
+        hal_puts_serial("tpm: bad response size\n");
         return -1;
     }
 
@@ -178,12 +199,14 @@ int tpm_transact(struct tpm_wr *w, uint8_t *rsp, size_t rsp_cap,
     r->tag  = tr_u16(r);
     (void)tr_u32(r);
     uint32_t code = tr_u32(r);
+    g_last_tpm_rc = code;
     if (code != 0) {
         con_puts("tpm ");
         con_puts(what);
         con_puts(" rc=0x");
         print_hex(code, 8);
         con_puts("\n");
+        serial_err_hex(what, code);
         return -1;
     }
     return 0;
@@ -394,7 +417,27 @@ int tpm2_unseal(const uint8_t *blob, size_t blob_len,
     return rc;
 }
 
+int tpm_policy_get_digest(uint32_t session, uint8_t *out, size_t *out_len)
+{
+    uint8_t cmd[16], rsp[64];
+    struct tpm_wr w;
+    struct tpm_rd r;
+
+    tw_begin(&w, cmd, sizeof(cmd), TPM_ST_NO_SESSIONS, 0x00000189u);
+    tw_u32(&w, session);
+    if (tpm_transact(&w, rsp, sizeof(rsp), &r, "policygetdigest") != 0)
+        return -1;
+    uint16_t n;
+    const uint8_t *d = tr_b2b(&r, &n);
+    if (r.err || !d || n == 0 || n > *out_len) return -1;
+    memcpy(out, d, n);
+    *out_len = n;
+    return 0;
+}
 #else /* !TPM */
+
+int tpm_policy_get_digest(uint32_t session, uint8_t *out, size_t *out_len)
+{ (void)session; (void)out; (void)out_len; return -1; }
 
 int tpm2_unseal(const uint8_t *blob, size_t blob_len,
                 const uint8_t *pin, size_t pin_len,

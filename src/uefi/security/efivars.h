@@ -39,4 +39,9 @@ void ivo_lastentry_clear(void);
 int ivo_configver_get(void);
 int ivo_configver_set(int v);
 
+/* Highest IVO_RELEASE seen. Fallback tier when TPM NV isn't
+ * available. Returns the value, -1 when absent, -2 when corrupt. */
+int ivo_fwver_get(void);
+int ivo_fwver_set(int v);
+
 #endif

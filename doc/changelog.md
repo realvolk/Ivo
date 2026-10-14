@@ -1,6 +1,40 @@
 # Ivo Bootloader Changelog
 
-## v1.1.1 — 2026-10-12
+## [v1.1.2] — 2026-10-14
+
+TPM was made by masochists
+
+### Added
+
+- TPM-sealed LUKS unlock. On-device enrollment via a
+  `/EFI/ivo/seal-request` marker on the ESP; the passphrase typed at
+  the prompt is sealed to a policy bound to PCR 4+7, with an optional
+  PIN. Unseal at boot hands the result to the same LUKS code path the
+  keyboard uses. Any failure falls through to the LUKS prompt. See
+  `doc/tpm.md`.
+- Firmware rollback protection. `IVO_RELEASE` is stored in a TPM NV
+  monotonic counter when a TPM is present, else in
+  `Ivo/FirmwareVer`. Refuses to boot a binary whose release number
+  is lower than the stored value. Requires Secure Boot for security
+  value. The TPM NV path is untested under QEMU; see `devnotes.md`.
+- `store-health` shell command: read-only report of which store is
+  authoritative and both stored values.
+
+### Fixed
+
+- `RT_SetVariable` vtable offset was wrong (0x50, not 0x58). Every
+  efivars write failed silently.
+- `PolicyGetDigest` was sent with command code `0x17E` (PCR_Read),
+  failing with `TPM_RC_SIZE` on a session handle. Correct code is
+  `0x189`. Oops
+- `main.c` extended PCR 4 with `"ivo: unseal window closed"` on the
+  enrollment boot, changing the PCR value after the sealed object
+  was created and breaking the policy on every subsequent boot.
+- `boot_status_begin` redraws the full panel.
+- Kernel cmdline editor clears the screen on exit.
+- Shell clears the screen on exit.
+
+## [v1.1.1] — 2026-10-12
 
 New features! (+ Bug fixes)
 
@@ -49,7 +83,7 @@ New features! (+ Bug fixes)
 - `ivo-sign --hash` prompts to bump the config version before
   rewriting. `--no-bump` skips the prompt.
 
-## v1.1.0 — 2026-10-12
+## [v1.1.0] — 2026-10-12
 
 UI fixes.
 
@@ -70,7 +104,7 @@ UI fixes.
 - `con_putc(' ')` no longer relied on for erase (it advances the
   cursor but paints nothing). `con_clear_row` added.
 
-## v1.0.0 — 2026-10-09
+## [v1.0.0] — 2026-10-09
 
 First stable release.
 

@@ -7,6 +7,21 @@
 #include "hal/hal.h"
 #include "fs/fs.h"
 
+/* This is only the binary's declaration of what version it is.
+ * Encoding: 0xMMmmpp (major, minor, patch). 0x010101 is v1.1.1. */
+#define IVO_VERSION 0x00010101
+
+/* Small integer, incremented by 1 with every release. Stored in the
+ * TPM NV monotonic counter (and, when TPM is absent, in the
+ * Ivo/FirmwareVer UEFI variable). */
+#define IVO_RELEASE 1
+
+/* Sanity ceiling on IVO_RELEASE. A value above this is almost
+ * certainly an error. Tripwire only: log and proceed, never refuse
+ * to boot over it. */
+#define IVO_CEILING 0x00FF0000
+
+
 #define TPM_PCR_BOOTLOADER  4
 #define TPM_PCR_KERNEL      8
 #define TPM_PCR_INITRD      9
@@ -21,6 +36,12 @@ void *mm_alloc(size_t size);
 void  mm_free(void *ptr);
 
 int   tpm_init(void);
+int   tpm_available(void);
+int   tpm_nv_fwver_ensure(int target, int *out);
+int   tpm_nv_fwver_read(int *out);
+/* Diagnostic only. */
+int   core_fwver_tier(void);
+
 void  tpm_measure(uint32_t pcr, const uint8_t *data, size_t len);
 void  tpm_measure_string(uint32_t pcr, const char *str);
 int   tpm2_unseal(const uint8_t *blob, size_t blob_len,

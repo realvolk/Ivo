@@ -91,7 +91,7 @@ int ivo_var_del(const char *name)
         *(void **)((uint8_t *)rt + RT_SetVariable);
 
     /* Setting with len 0 and no data deletes a variable. An
-     * already-absent variable returns EFI_NOT_FOUND, which we treat
+     * already-absent variable returns EFI_NOT_FOUND, treated
      * as success: the caller wanted it gone. */
     EFI_STATUS s = set(wname, &IVO_GUID, 0, 0, 0);
     if (s == EFI_SUCCESS) return 0;
@@ -184,4 +184,37 @@ int ivo_configver_set(int v)
     buf[2] = (uint8_t)(u >> 16);
     buf[3] = (uint8_t)(u >> 24);
     return ivo_var_set(CONFIGVER_VAR, buf, 4);
+}
+
+#define FWVER_VAR "Ivo/FirmwareVer"
+
+/* Returns the stored value, -1 when the variable is absent, or -2
+ * when it exists but is malformed (wrong length, negative). The
+ * caller distinguishes absent from corrupt: corrupt is left alone,
+ * absent is initialized. */
+int ivo_fwver_get(void)
+{
+    uint8_t buf[16];
+    size_t len = 0;
+    if (ivo_var_get(FWVER_VAR, buf, &len, sizeof(buf)) != 0)
+        return -1;
+    if (len != 4) return -2;
+    int32_t v = (int32_t)(buf[0] | (buf[1] << 8) |
+                          (buf[2] << 16) | ((uint32_t)buf[3] << 24));
+    if (v < 0) return -2;
+    return (int)v;
+}
+
+int ivo_fwver_set(int v)
+{
+    if (v < 0) return -1;
+    if (v > IVO_CEILING)
+        hal_puts_serial("ivo: FirmwareVer above ceiling\n");
+    uint8_t buf[4];
+    uint32_t u = (uint32_t)v;
+    buf[0] = (uint8_t)u;
+    buf[1] = (uint8_t)(u >> 8);
+    buf[2] = (uint8_t)(u >> 16);
+    buf[3] = (uint8_t)(u >> 24);
+    return ivo_var_set(FWVER_VAR, buf, 4);
 }

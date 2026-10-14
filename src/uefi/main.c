@@ -20,6 +20,9 @@ extern int hal_boot_partition_decided;
  * nobody at the keyboard has proven they know the passphrase. The
  * shell checks it before exposing the decrypted filesystem. */
 static int unlocked_without_passphrase;
+static int g_fwver_tier;
+
+int core_fwver_tier(void) { return g_fwver_tier; }
 
 int core_unlocked_without_passphrase(void)
 {
@@ -43,6 +46,42 @@ void ivo_main(boot_context_t *ctx)
     con_clear();
     mm_init(ctx);
     tpm_init();
+
+    /* Firmware rollback protection. One authoritative store: TPM NV
+     * counter when available, else UEFI variable. Requires SB on for
+     * security value. See list.md "v1.2 — Security". */
+    {
+        int nv_ok = 0;
+        int nv_v  = -1;
+
+        if (tpm_available()) {
+            if (tpm_nv_fwver_ensure(IVO_RELEASE, &nv_v) == 0)
+                nv_ok = 1;
+        }
+
+        g_fwver_tier = nv_ok ? 1 : 0;
+
+        if (nv_ok) {
+            if (nv_v > IVO_RELEASE)
+                panic("Ivo binary is older than the last one that ran");
+            /* Keep the fallback in sync. No-op after the first boot. */
+            ivo_fwver_set(IVO_RELEASE);
+        } else {
+            int uv = ivo_fwver_get();
+            if (uv == -2) {
+                /* Corrupt store: fail-open, do not overwrite. Next
+                 * boot retries. */
+                hal_puts_serial("ivo: FirmwareVer corrupt; not overwritten\n");
+            } else if (uv < 0) {
+                ivo_fwver_set(IVO_RELEASE);
+            } else if (uv > IVO_RELEASE) {
+                panic("Ivo binary is older than the last one that ran");
+            } else if (uv < IVO_RELEASE) {
+                ivo_fwver_set(IVO_RELEASE);
+            }
+        }
+    }
+
     int bc = ivo_bootcount_get();
     ivo_bootcount_set(bc + 1);
 
@@ -61,13 +100,17 @@ void ivo_main(boot_context_t *ctx)
     dev.block_size = 512;
     dev.private    = 0;
 
+    int sealed_this_boot = 0;
+
     if (luks_enabled(ctx)) {
         /* Enrollment mode: if /EFI/ivo/seal-request exists, prompt
          * for the passphrase, unlock with it, and seal it to the TPM.
          * Returns 1 if it handled the unlock; falls through to the
          * normal path if the passphrase was wrong. */
         int handled = tpm_seal_maybe_enroll(ctx) == 1;
-        if (!handled) {
+        if (handled) {
+            sealed_this_boot = 1;
+        } else {
             int unlocked = tpm_seal_try_unlock(ctx) == 0;
             if (unlocked) {
                 unlocked_without_passphrase = 1;
@@ -79,8 +122,13 @@ void ivo_main(boot_context_t *ctx)
 
     /* Close the unseal window. The sealed blob is bound to PCR 4, so
      * once this separator is in, nothing later in this boot (the
-     * shell, the kernel, the OS) can unseal it again. */
-    tpm_measure_string(TPM_PCR_BOOTLOADER, "ivo: unseal window closed");
+     * shell, the kernel, the OS) can unseal it again.
+     *
+     * Skip on the enrollment boot: PCR 4 at seal time must be the
+     * value the next boot sees, and extending it here would make the
+     * policy fail on every subsequent boot. */
+    if (!sealed_this_boot)
+        tpm_measure_string(TPM_PCR_BOOTLOADER, "ivo: unseal window closed");
 
 #ifdef LVM
     if (lvm_init(ctx) == 0) {

@@ -26,7 +26,7 @@ static void status_row(int row, const char *label, const char *value)
 
 static void boot_status_begin(const char *entry_name)
 {
-    frame_title(theme_current.header);
+    frame_begin(theme_current.header);
     frame_content_clear();
 
     char buf[128];
@@ -223,6 +223,7 @@ int boot_entry(boot_context_t *ctx, entry_t *entry)
     if (entry_password_check(entry) != 0) {
         return 0;
     }
+    con_clear();
 
     boot_status_begin(entry->name);
 #ifdef SECURE_BOOT

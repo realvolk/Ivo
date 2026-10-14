@@ -251,3 +251,23 @@ void aes_decrypt_block(const struct aes_ctx *ctx,
 void aes_clear(struct aes_ctx *ctx) {
     if (ctx) ivo_wipe(ctx, sizeof(*ctx));
 }
+
+void aes_cfb128_encrypt(struct aes_ctx *ctx,
+                        const uint8_t iv[AES_BLOCK_SIZE],
+                        const uint8_t *in, uint8_t *out, size_t len)
+{
+    uint8_t feedback[AES_BLOCK_SIZE];
+    uint8_t keystream[AES_BLOCK_SIZE];
+    memcpy(feedback, iv, AES_BLOCK_SIZE);
+
+    size_t block = 0;
+    for (size_t i = 0; i < len; i++) {
+        if ((i % AES_BLOCK_SIZE) == 0) {
+            aes_encrypt_block(ctx, feedback, keystream);
+            block = i;
+        }
+        uint8_t ks = keystream[i - block];
+        out[i] = in[i] ^ ks;
+        feedback[i - block] = out[i];
+    }
+}

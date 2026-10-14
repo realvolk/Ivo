@@ -32,4 +32,10 @@ void aes_decrypt_block(const struct aes_ctx *ctx,
                        uint8_t out[AES_BLOCK_SIZE]);
 void aes_clear(struct aes_ctx *ctx);
 
+/* CFB-128 (segment size = block size). *iv is updated in place.
+ * Encrypt and decrypt are the same operation. */
+void aes_cfb128_encrypt(struct aes_ctx *ctx,
+                        const uint8_t iv[AES_BLOCK_SIZE],
+                        const uint8_t *in, uint8_t *out, size_t len);
+
 #endif

@@ -1,5 +1,6 @@
 #include "core.h"
 #include "security/wipe.h"
+#include "security/efivars.h"
 
 #define SHELL_MAX_CMD   256
 #define SHELL_MAX_PATH  256
@@ -55,6 +56,7 @@ static void cmd_help(void)
     con_puts("  entries       list configured boot entries\n");
     con_puts("  boot <name>   boot an entry by name\n");
     con_puts("  disk          show boot disk size\n");
+    con_puts("  store-health  firmware version store status\n");
     con_puts("  clear         clear the screen\n");
     con_puts("  reboot        reboot the machine\n");
     con_puts("  halt          halt the machine\n");
@@ -209,6 +211,24 @@ static int cmd_boot(boot_context_t *ctx, const char *name)
     return 0;
 }
 
+static void cmd_store_health(void)
+{
+    int nv_v = -1;
+    if (tpm_nv_fwver_read(&nv_v) != 0) nv_v = -1;
+    int uv_v = ivo_fwver_get();
+
+    con_puts("tier: ");
+    con_puts(core_fwver_tier() ? "TPM NV" : "UEFI variable");
+    con_puts("\nnv:   ");
+    if (nv_v < 0) con_puts("-");
+    else print_uint((uint64_t)nv_v);
+    con_puts("\nuvar: ");
+    if (uv_v == -2) con_puts("corrupt");
+    else if (uv_v < 0) con_puts("-");
+    else print_uint((uint64_t)uv_v);
+    con_puts("\n");
+}
+
 static void cmd_disk(void)
 {
     uint64_t total_sectors = 0;
@@ -318,6 +338,8 @@ void shell_enter(boot_context_t *ctx)
             cmd_boot(ctx, skip_spaces(cmd + 5));
         } else if (strcmp(cmd, "disk") == 0) {
             cmd_disk();
+        } else if (strcmp(cmd, "store-health") == 0) {
+            cmd_store_health();
         } else if (strcmp(cmd, "clear") == 0) {
             con_clear();
         } else if (strcmp(cmd, "reboot") == 0) {

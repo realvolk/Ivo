@@ -17,12 +17,6 @@
 #include "security/tpm/tpm_internal.h"
 #include "security/wipe.h"
 
-#define TPM_CC_CREATE_PRIMARY     0x00000131u
-#define TPM_CC_EVICT_CONTROL      0x00000120u
-#define TPM_CC_CREATE             0x00000153u
-#define TPM_CC_READ_PUBLIC        0x00000173u
-#define TPM_CC_POLICY_GET_DIGEST  0x0000017Eu
-
 /* Standard SRK handle. systemd-cryptenroll uses the same value; the
  * Linux kernel's trusted-key subsystem does too. Persistent, not
  * transient, because transient handles are lost on TPM reset. */
@@ -56,27 +50,6 @@ static int cmd_read_public(uint32_t handle)
     tw_begin(&w, cmd, sizeof(cmd), TPM_ST_NO_SESSIONS, TPM_CC_READ_PUBLIC);
     tw_u32(&w, handle);
     return tpm_transact(&w, rsp, sizeof(rsp), &r, "readpublic");
-}
-
-static int cmd_policy_get_digest(uint32_t session,
-                                 uint8_t *digest, size_t *digest_len)
-{
-    uint8_t cmd[16], rsp[64];
-    struct tpm_wr w;
-    struct tpm_rd r;
-
-    tw_begin(&w, cmd, sizeof(cmd), TPM_ST_NO_SESSIONS,
-             TPM_CC_POLICY_GET_DIGEST);
-    tw_u32(&w, session);
-    if (tpm_transact(&w, rsp, sizeof(rsp), &r, "policygetdigest") != 0)
-        return -1;
-
-    uint16_t n;
-    const uint8_t *d = tr_b2b(&r, &n);
-    if (r.err || !d || n == 0 || n > *digest_len) return -1;
-    memcpy(digest, d, n);
-    *digest_len = n;
-    return 0;
 }
 
 static int cmd_create_primary(uint32_t *handle_out)
@@ -208,23 +181,39 @@ int tpm2_seal_create(const uint8_t *secret, size_t secret_len,
     /* Ensure the SRK exists at SRK_HANDLE. */
     if (cmd_read_public(SRK_HANDLE) != 0) {
         uint32_t transient = 0;
-        if (cmd_create_primary(&transient) != 0) return -1;
+        if (cmd_create_primary(&transient) != 0) {
+            hal_puts_serial("tpm enroll: createprimary failed\n");
+            return -1;
+        }
         int rc = cmd_evict_control(transient, SRK_HANDLE);
         tpm_flush(transient);
-        if (rc != 0) return -1;
+        if (rc != 0) {
+            hal_puts_serial("tpm enroll: evictcontrol failed\n");
+            return -1;
+        }
     }
 
-    /* Build the auth policy in a trial session, against the current
-     * PCR values. */
-    uint32_t trial = 0;
+    /* Build the auth policy in a trial session and let the TPM report
+     * the digest. The TPM is the authority on its own policy format;
+     * a local computation risks a subtle mismatch with what Unseal
+     * will check. */
     uint8_t  policy[32];
     size_t   policy_len = sizeof(policy);
-    if (tpm_start_session(TPM_SE_TRIAL, &trial) != 0) return -1;
-    int prc = tpm_policy_pcr(trial, pcr_mask);
-    if (prc == 0 && pin_len > 0) prc = tpm_policy_password(trial);
-    if (prc == 0) prc = cmd_policy_get_digest(trial, policy, &policy_len);
-    tpm_flush(trial);
-    if (prc != 0) return -1;
+    {
+        uint32_t trial = 0;
+        if (tpm_start_session(TPM_SE_TRIAL, &trial) != 0) {
+            hal_puts_serial("tpm enroll: trial session failed\n");
+            return -1;
+        }
+        int prc = tpm_policy_pcr(trial, pcr_mask);
+        if (prc == 0 && pin_len > 0) prc = tpm_policy_password(trial);
+        if (prc == 0) prc = tpm_policy_get_digest(trial, policy, &policy_len);
+        tpm_flush(trial);
+        if (prc != 0) {
+            hal_puts_serial("tpm enroll: trial policy failed\n");
+            return -1;
+        }
+    }
 
     /* Create the sealed object under the SRK. */
     uint8_t out_priv[IVO_SEAL_PART_MAX];
@@ -237,8 +226,10 @@ int tpm2_seal_create(const uint8_t *secret, size_t secret_len,
                    pin, pin_len,
                    policy, policy_len,
                    out_priv, &out_priv_len,
-                   out_pub,  &out_pub_len) != 0)
+                   out_pub,  &out_pub_len) != 0) {
+        hal_puts_serial("tpm enroll: create failed\n");
         return -1;
+    }
 
     /* Assemble the IVO_SEAL v2 blob. Header is little-endian. */
     size_t total = IVO_SEAL_HDR_LEN + out_priv_len + out_pub_len;

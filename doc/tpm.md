@@ -1,10 +1,10 @@
 # TPM sealing — Reader Notes
 
 Reader is `src/uefi/security/tpm/tpm_seal.c` and `tpm_seal_create.c`,
-commands in `src/uefi/security/tpm/tpm_cmd.c`. Unlocks a LUKS volume by unsealing a secret
-from the TPM and handing it to the same LUKS code path the keyboard
-uses. Opt-in, not default. Compiled in only with `TPM=1` (`-DTPM`);
-without it every entry point is a stub that does nothing.
+commands in `src/uefi/security/tpm/tpm_cmd.c`. Unlocks a LUKS volume
+by unsealing a secret from the TPM and handing it to the same LUKS
+code path the keyboard uses. Opt-in, not default. Compiled in only
+with `TPM=1` (`-DTPM`); without it every entry point is a stub.
 
 ## Where TPM sealing sits
 
@@ -47,7 +47,10 @@ The separator closes the unseal window: once the unlock stage is over,
 PCR 4 no longer holds the value the policy was sealed against, so the
 kernel, initrd and userspace of this boot can't unseal the secret
 again. PCR 4 is measured by firmware (it covers `ivo.efi`'s
-Authenticode hash); Ivo does not measure itself.
+Authenticode hash); Ivo does not measure itself. The extension is
+skipped on the boot that performs enrollment: PCR 4 at seal time must
+be the value the next boot sees, and extending it in the same boot
+would break the policy before the next boot runs.
 
 ## What gets sealed
 
@@ -147,12 +150,19 @@ dictionary-attack lockout.
 Policy chain at enrollment:
 
 ```
-StartAuthSession (policy)
-PolicyPCR       → digest := H(digest || TPM_CC_PolicyPCR || pcrs || pcrDigest)
-PolicyPassword  → digest := H(digest || TPM_CC_PolicyAuthValue)
-GetDigest       → read the final digest
-Create          → authPolicy = final digest, authValue = PIN
+StartAuthSession (trial)  — the digest is computed against the TPM's
+                            current PCR state
+PolicyPCR                 — extend with the current PCR selection
+PolicyPassword            — extend if a PIN will be required
+PolicyGetDigest           — read the resulting digest; that value is
+                            stored as the sealed object's authPolicy
 ```
+
+The TPM returns the digest. The reader does not compute it. A trial
+session is used so the TPM's own policy engine produces the digest;
+the same engine produces the session digest at unseal time, and the
+two must match. Computing the digest client-side risks a subtle
+format mismatch that only shows up as `TPM_RC_POLICY_FAIL` at unseal.
 
 `PolicyPassword` is the command sent; the TPM internally extends the
 digest with `TPM_CC_PolicyAuthValue` (0x16B), not
@@ -166,14 +176,15 @@ attacker who knows the PIN but can't replicate the firmware state.
 
 ## TPM commands
 
-Six, hand-marshalled over `EFI_TCG2_PROTOCOL.SubmitCommand`:
+Seven, hand-marshalled over `EFI_TCG2_PROTOCOL.SubmitCommand`:
 
 | Code | Command | Purpose |
 |---|---|---|
 | 0x00000157 | TPM2_Load | Load the sealed object under its parent |
-| 0x00000176 | TPM2_StartAuthSession | Create a policy session |
+| 0x00000176 | TPM2_StartAuthSession | Create a trial or policy session |
 | 0x0000017F | TPM2_PolicyPCR | Bind the session to the PCR policy |
 | 0x0000018C | TPM2_PolicyPassword | Require a PIN when the session is used |
+| 0x00000189 | TPM2_PolicyGetDigest | Read the trial session's policy digest |
 | 0x0000015E | TPM2_Unseal | Release the sealed bytes |
 | 0x00000165 | TPM2_FlushContext | Free the session and object |
 
@@ -218,6 +229,10 @@ None" for the policy session handle. Handle in the handle area, tag
 `TPM_ST_NO_SESSIONS`, no auth area. Sending an auth block: TPM
 rejects with `TPM_RC_HANDLE`.
 
+**`PolicyGetDigest` command code.** `0x00000189`, not `0x0000017E`.
+`0x017E` is `PCR_Read`. Sending `PCR_Read`'s code with a session
+handle fails with `TPM_RC_SIZE` on parameter 1.
+
 **`Unseal` session attributes.** The policy session's auth block must
 have `continueSession` set (bit 0, value `0x01`). Without it, the
 session is flushed as a side effect of the unseal; response is
@@ -257,13 +272,19 @@ SHA-256, `authPolicy` = PolicyPCR(4,7) [+ PolicyPassword].
    anything else skips sealing and the boot continues normally with
    the passphrase already typed.
 4. Optionally set a PIN (entered twice; empty = no PIN).
-5. Ivo creates the SRK at `0x81000001` if needed, seals, and writes
+5. Ivo creates the SRK at `0x81000001` if needed, opens a trial
+   session, runs PolicyPCR [+ PolicyPassword], reads the digest via
+   `PolicyGetDigest`, and passes that digest to `Create`. Writes
    `/EFI/ivo/sealed.bin`. Delete `/EFI/ivo/seal-request` afterwards;
    while `sealed.bin` exists the request is ignored.
 
 The request file sits on the unencrypted ESP, so anyone with write
 access to it can bring up the confirmation screen. That is why the
 screen exists: the file alone never causes anything to be sealed.
+
+Rebuilding `ivo.efi` after enrollment changes PCR 4 and invalidates
+the seal. The next boot's unseal fails, the LUKS prompt appears, and
+re-enrollment is required.
 
 ### Host-side (development, swtpm)
 
@@ -472,34 +493,117 @@ hostile input.
 
 ## Verified
 
-The wire-format claims below are from an earlier revision of the code
-(PCR 8/23, host-side enrollment only). They exercised the unseal path
-and the marshalling; they did not exercise the current PCR 4+7 default
-or the on-device enrollment flow. Re-verify before trusting the
-defaults.
-
-- **PIN-less sealing.** Blob bound to PCR 8, LUKS2 volume with the
-  sealed passphrase in keyslot 0. Boot reaches `Ivo: Booting
-  <entry>` without printing `Passphrase:`.
-- **PIN sealing.** Blob bound to PCR 23 with `flags = 0x01`, LUKS2
-  volume with the TPM passphrase in slot 1 and the human passphrase
-  in slot 0. Boot prompts `TPM PIN: `, accepts `1234`, reaches
-  `Ivo: Booting <entry>` without a LUKS prompt. Wrong PIN returns
-  `TPM_RC_AUTH_FAIL` (0x98E), falls through to `Passphrase: `, which
-  accepts the human passphrase.
-- **Host-side unseal.** `tpm2_unseal` against the same swtpm state
-  produces the same bytes and the same LUKS digest. Bootloader and
-  host tools agree on the wire format.
+- **Unseal succeeds with matching PCR state.** Blob sealed to PCR 4+7
+  during on-device enrollment; reboot against the same swtpm state,
+  same OVMF, same `ivo.efi`. Boot reaches the menu with only the TPM
+  PIN prompt. No LUKS prompt.
+- **Wrong PCR state falls through.** Rebuilding `ivo.efi` between
+  enrollment and unseal changes PCR 4; unseal returns
+  `TPM_RC_POLICY_FAIL` (0x99D) and the LUKS prompt appears.
+- **Host-side enrollment.** `tpm2_create` against swtpm produces a
+  blob the bootloader unseals with the same policy digest that
+  `tpm2_getpolicydigest` reports.
 
 ## Not verified
 
-- Sealing to PCR 4+7 end to end (see above).
 - Key rotation. Changing the LUKS keyslot, the parent handle, or the
   PCR set requires re-running enrollment. None of those paths have
   been exercised.
+- PIN entry and `TPM_RC_AUTH_FAIL` fallthrough in the current code
+  (verified in an earlier revision with a different PCR set).
 - Sharing a single swtpm between tpm2-tools and QEMU. They can't run
   simultaneously against the same process. Enrollment and boot
   require a state-file round-trip.
+
+## NV monotonic counter (rollback protection)
+
+`tpm_nv.c`. Separate from the sealing path: this defines an NV
+counter at `0x01800000` and stores `IVO_RELEASE` there. It is the
+authoritative tier for firmware rollback protection when a TPM is
+present; the UEFI variable `Ivo/FirmwareVer` is the fallback.
+
+Three commands, hand-marshalled like the sealing ones:
+
+| Code | Command |
+|---|---|
+| 0x0000012A | TPM2_NV_DefineSpace |
+| 0x00000134 | TPM2_NV_Increment |
+| 0x0000014E | TPM2_NV_Read |
+
+`NV_DefineSpace` parameters are `(auth: TPM2B_AUTH, publicInfo:
+TPM2B_NV_PUBLIC)`. The `auth` blob is empty and must still be sent —
+omitting it makes the TPM read `publicInfo`'s size prefix as `auth`'s
+size and the command fails with `TPM_RC_SIZE`.
+
+`NV_DefineSpace` requires at least one write attribute on any index,
+including counters. `OWNERWRITE` matches the `TPM_RH_OWNER` auth used
+by `NV_Increment`. Counters forbid `ORDERLY` and `NO_DA`.
+
+`NV_Read` on a counter whose `TPMA_NV_WRITTEN` is clear returns
+`TPM_RC_NV_UNINITIALIZED` (`0x14A`). That is "counter is at 0", not a
+failure. `tpm_nv.c` treats it as 0. The first `NV_Increment`
+initializes the counter and sets `WRITTEN`.
+
+`last_tpm_rc()` in `tpm_cmd.c` exposes the rc of the most recent
+transaction. Used by `read_counter` to distinguish `0x14A` from a
+real read failure.
+
+### Cannot be tested under QEMU
+
+swtpm's libtpms accepts the define but does not preserve
+`TPMA_NV_COUNTER` in a form `NV_Increment` recognizes. Increment
+returns `TPM_RC_ATTRIBUTES | RC_NV_Increment_nvIndex` (`0x12F`).
+`tpm2-tools` against the same swtpm state fails identically, so this
+is a swtpm limitation, not an Ivo bug.
+
+Ivo's serial output against a fresh swtpm state, first boot:
+
+```
+nv ensure: enter
+tpm nvread rc=0x0000018b         ; index absent
+nv ensure: read failed, defining
+tpm nvdefine rc=0x00000000       ; define ok
+nv ensure: define ok
+tpm nvread rc=0x0000014a         ; counter at 0
+nv ensure: current=0
+tpm nvincrement rc=0x0000012f    ; not a counter
+nv ensure: increment failed
+```
+
+The failure falls through to the UEFI variable tier and boot
+proceeds normally. Both tiers write `IVO_RELEASE`; the feature works
+under QEMU, just via the fallback. The NV tier requires real hardware
+whose TPM implements `TPM_NT_COUNTER`. Test there before trusting it.
+
+`tpm2_nvdefine` against a swtpm state where Ivo already defined the
+counter returns `0x14C` (`NV Index already defined`). Same state, not
+a separate TPM. Wipe state or pick a different index before testing
+with `tpm2-tools`.
+
+## Salted sessions (not implemented)
+
+The unseal path uses an unsalted policy session: `StartAuthSession`
+with `tpmKey` and `bind` both `TPM_RH_NULL`, symmetric
+`TPM_ALG_NULL`, no encrypted salt. Parameters are not encrypted.
+
+A salted session was attempted. RSA-OAEP-SHA256 encrypt the salt to
+the SRK using the TPM's `"SECRET"` OAEP label, derive the session key
+via SP800-108 KDFa, wrap the Unseal parameters in AES-128-CFB. Under
+swtpm this fails with `TPM_RC_VALUE | param 2` (`0x2C4`) on
+`StartAuthSession`. Parameter 2 is `encryptedSalt`.
+
+The wire command is well-formed. `tpm2-tools` starts a salted session
+against the same SRK on the same swtpm instance without error. The
+SRK has the correct `restricted|decrypt` attributes. The failure is
+in swtpm's handling of the RSA-OAEP ciphertext.
+
+The code was removed (`tpm_session.c`, `rsa.c`, `rsa.h`, the KDFa
+helper in `tpm_cmd.c`). It may return if the threat model changes.
+
+Threat model: with SMM and a CRB trapped by the SMI handler, the
+unsealed passphrase does not cross the TPM bus in a form an external
+observer can read. On QEMU+swtpm the "bus" is a local socket. Neither
+is a practical cleartext exposure.
 
 ## Reference
 

@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.1.1-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v1.1.2-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-CLEAR_v1-yellow?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/C-98%25-555555?style=flat-square&logo=c" alt="C">
   <img src="https://img.shields.io/badge/make-1%25-6E4C13?style=flat-square" alt="Make">
@@ -73,7 +73,7 @@ kernel directly.
 - Kernel cmdline editor at boot
 - Text-mode fallback when GOP is unavailable
 - Ed25519-signed config, SHA-512-verified kernel/initrd/chainload
-- Best-effort rollback protection (`version` key vs UEFI variable)
+- Rollback protection: TPM NV counter when present, else UEFI variable
 - Firmware Secure Boot (signed PE/COFF, `db`-enrolled)
 - Manual PE/COFF kernel handoff that bypasses `LoadImage`
 - Live ISO boot from a raw partition
@@ -283,14 +283,24 @@ unlock, Ivo extends PCR 4 with a separator. A passphrase sealed to
 PCR 4 + 7 unseals only before the separator. Measurement is a record,
 not a gate.
 
-Rollback protection for signed configs is best-effort: Ivo compares a
-`version` key in the config against a value stored in a UEFI variable,
-and refuses to boot an older config. Anyone with ESP write access can
-delete the variable and reset the check. A TPM NV counter is the real
-fix and is not implemented. Cold-boot and DMA attacks on DRAM are out
-of scope. Firmware-owned memory that Ivo does not clear survives
-handoff. So does the kernel's own in-memory copy of anything it later
-loads.
+Rollback protection for signed configs and for the bootloader itself
+stores `IVO_RELEASE` in a TPM NV monotonic counter when a TPM is
+present, else in the UEFI variable `Ivo/FirmwareVer`. Ivo refuses to
+boot a binary or a config whose release number is lower than the
+stored value.
+
+The UEFI variable tier is best-effort: anyone with ESP write access
+can delete the variable and reset the check. The NV tier cannot be
+reset without TPM owner authorization. On a system without a TPM the
+protection is a nuisance to attackers, not a barrier.
+
+The NV tier has not been exercised under QEMU — swtpm's libtpms does
+not preserve `TPMA_NV_COUNTER` across define and increment. See
+`devnotes.md` and `doc/tpm.md` § "NV monotonic counter".
+
+Cold-boot and DMA attacks on DRAM are out of scope. Firmware-owned
+memory that Ivo does not clear survives handoff. So does the kernel's
+own in-memory copy of anything it later loads.
 
 The recovery shell (Esc) reads the boot filesystem. If the disk was
 unlocked from the TPM, it asks for the LUKS passphrase before any

@@ -23,6 +23,21 @@
 #define TPM_SE_POLICY 0x01u
 #define TPM_SE_TRIAL  0x03u
 
+#define TPM_CC_CREATE_PRIMARY      0x00000131u
+#define TPM_CC_EVICT_CONTROL       0x00000120u
+#define TPM_CC_CREATE              0x00000153u
+#define TPM_CC_LOAD                0x00000157u
+#define TPM_CC_UNSEAL              0x0000015Eu
+#define TPM_CC_FLUSH_CONTEXT       0x00000165u
+#define TPM_CC_READ_PUBLIC         0x00000173u
+#define TPM_CC_START_AUTH_SESSION  0x00000176u
+#define TPM_CC_NV_DEFINE_SPACE     0x0000012Au
+#define TPM_CC_NV_INCREMENT        0x00000134u
+#define TPM_CC_NV_READ             0x0000014Eu
+#define TPM_CC_POLICY_GET_DIGEST   0x00000189u
+#define TPM_CC_POLICY_PCR          0x0000017Fu
+#define TPM_CC_POLICY_PASSWORD     0x0000018Cu
+
 #define TPM_ALG_RSA       0x0001u
 #define TPM_ALG_AES       0x0006u
 #define TPM_ALG_KEYEDHASH 0x0008u
@@ -68,6 +83,7 @@ void tw_b2b(struct tpm_wr *w, const void *p, size_t n);   /* TPM2B */
 void tw_auth(struct tpm_wr *w, uint32_t session, uint8_t attrs,
              const uint8_t *hmac, size_t hmac_len);
 
+uint8_t        tr_u8(struct tpm_rd *r);
 uint16_t       tr_u16(struct tpm_rd *r);
 uint32_t       tr_u32(struct tpm_rd *r);
 const uint8_t *tr_b2b(struct tpm_rd *r, uint16_t *len);   /* TPM2B */
@@ -80,9 +96,17 @@ void           tr_params(struct tpm_rd *r);
 int  tpm_transact(struct tpm_wr *w, uint8_t *rsp, size_t rsp_cap,
                   struct tpm_rd *r, const char *what);
 
+/* TPM error code from the most recent tpm_transact call. 0 on success. */
+uint32_t last_tpm_rc(void);
+
 int  tpm_start_session(uint8_t type, uint32_t *session_out);
 int  tpm_policy_pcr(uint32_t session, uint32_t pcr_mask);
 int  tpm_policy_password(uint32_t session);
 void tpm_flush(uint32_t handle);
+
+/* PolicyGetDigest. Returns the current policy digest of a trial or
+ * policy session. Used at enrollment to let the TPM compute the
+ * authPolicy for the sealed object. */
+int  tpm_policy_get_digest(uint32_t session, uint8_t *out, size_t *out_len);
 
 #endif
