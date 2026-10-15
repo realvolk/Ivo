@@ -675,13 +675,13 @@ int hal_write_blocks(uint64_t lba, uint32_t count, const void *buf)
 
 void hal_get_disk_info(uint64_t *total_sectors, uint32_t *sector_size)
 {
-    if (!g_block_io || !g_block_io->Media) {
+    if (!g_disk_block_io || !g_disk_block_io->Media) {
         *total_sectors = 0;
         *sector_size = 512;
         return;
     }
-    *total_sectors = g_block_io->Media->LastBlock + 1;
-    *sector_size = g_block_io->Media->BlockSize;
+    *total_sectors = g_disk_block_io->Media->LastBlock + 1;
+    *sector_size = g_disk_block_io->Media->BlockSize;
 }
 
 static uint32_t uefi_to_e820_type(uint32_t t)

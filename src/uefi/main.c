@@ -16,9 +16,6 @@ extern int lvm_lv_select(int index);
 
 extern int hal_boot_partition_decided;
 
-/* Set when the LUKS volume was opened from a TPM-sealed secret, i.e.
- * nobody at the keyboard has proven they know the passphrase. The
- * shell checks it before exposing the decrypted filesystem. */
 static int unlocked_without_passphrase;
 static int g_fwver_tier;
 
@@ -47,30 +44,35 @@ void ivo_main(boot_context_t *ctx)
     mm_init(ctx);
     tpm_init();
 
-    /* Firmware rollback protection. One authoritative store: TPM NV
-     * counter when available, else UEFI variable. Requires SB on for
-     * security value. See list.md "v1.2 — Security". */
+    /* Rollback protection. TPM NV counter is the authoritative store
+     * when available; the UEFI variable Ivo/FirmwareVer is the
+     * fallback. A corrupt store is left alone; the next boot retries.
+     * Requires SB for security value. */
     {
         int nv_ok = 0;
         int nv_v  = -1;
+        int nv_corrupt = 0;
 
         if (tpm_available()) {
-            if (tpm_nv_fwver_ensure(IVO_RELEASE, &nv_v) == 0)
+            int nv_rc = tpm_nv_fwver_ensure(IVO_RELEASE, &nv_v);
+            if (nv_rc == 0) {
                 nv_ok = 1;
+            } else if (nv_rc == -2) {
+                nv_corrupt = 1;
+            }
         }
 
         g_fwver_tier = nv_ok ? 1 : 0;
 
-        if (nv_ok) {
+        if (nv_corrupt) {
+            hal_puts_serial("ivo: NV counter corrupt; not overwritten\n");
+        } else if (nv_ok) {
             if (nv_v > IVO_RELEASE)
                 panic("Ivo binary is older than the last one that ran");
-            /* Keep the fallback in sync. No-op after the first boot. */
             ivo_fwver_set(IVO_RELEASE);
         } else {
             int uv = ivo_fwver_get();
             if (uv == -2) {
-                /* Corrupt store: fail-open, do not overwrite. Next
-                 * boot retries. */
                 hal_puts_serial("ivo: FirmwareVer corrupt; not overwritten\n");
             } else if (uv < 0) {
                 ivo_fwver_set(IVO_RELEASE);
@@ -85,11 +87,6 @@ void ivo_main(boot_context_t *ctx)
     int bc = ivo_bootcount_get();
     ivo_bootcount_set(bc + 1);
 
-    /* No self-measurement: firmware already measured ivo.efi into
-     * PCR 4 when it loaded it. Hashing the in-memory image would mix
-     * relocations and runtime .data/.bss into PCR 4 and make it
-     * unpredictable across boots. */
-
     if (!hal_boot_partition_decided) {
         ctx->boot_lba = 0;
     }
@@ -103,10 +100,6 @@ void ivo_main(boot_context_t *ctx)
     int sealed_this_boot = 0;
 
     if (luks_enabled(ctx)) {
-        /* Enrollment mode: if /EFI/ivo/seal-request exists, prompt
-         * for the passphrase, unlock with it, and seal it to the TPM.
-         * Returns 1 if it handled the unlock; falls through to the
-         * normal path if the passphrase was wrong. */
         int handled = tpm_seal_maybe_enroll(ctx) == 1;
         if (handled) {
             sealed_this_boot = 1;
@@ -120,20 +113,14 @@ void ivo_main(boot_context_t *ctx)
         }
     }
 
-    /* Close the unseal window. The sealed blob is bound to PCR 4, so
-     * once this separator is in, nothing later in this boot (the
-     * shell, the kernel, the OS) can unseal it again.
-     *
-     * Skip on the enrollment boot: PCR 4 at seal time must be the
-     * value the next boot sees, and extending it here would make the
-     * policy fail on every subsequent boot. */
+    /* Closes the unseal window: after this, PCR 4 no longer holds the
+     * value a blob was sealed against. Skipped on the enrollment boot
+     * so the seal survives to the next boot. */
     if (!sealed_this_boot)
         tpm_measure_string(TPM_PCR_BOOTLOADER, "ivo: unseal window closed");
 
 #ifdef LVM
     if (lvm_init(ctx) == 0) {
-        /* Try each LV. The first one whose filesystem the probe
-         * recognises becomes the boot device. */
         int mounted = 0;
         int count = lvm_lv_count();
         for (int i = 0; i < count; i++) {
@@ -173,11 +160,10 @@ void ivo_main(boot_context_t *ctx)
         halt();
     }
 
-    /* Rollback protection: refuse a config older than the last one we
-     * accepted. Best-effort; the efivar can be deleted by anyone with
-     * ESP write access, which resets the check. See doc/security.md. */
+    /* Config rollback protection. Best-effort: the efivar can be
+     * deleted by anyone with ESP write access. */
     {
-        int cv = config_get_version();      /* -1 if no version key */
+        int cv = config_get_version();
         if (cv >= 0) {
             int stored = ivo_configver_get();
             if (stored >= 0 && cv < stored)
@@ -195,11 +181,8 @@ void ivo_main(boot_context_t *ctx)
             halt();
         }
 
-        if (boot_entry(ctx, chosen) == 0) {
-            /* boot_failed showed the reason and waited for a key.
-             * Back to the menu. */
+        if (boot_entry(ctx, chosen) == 0)
             continue;
-        }
         break;
     }
 

@@ -214,18 +214,19 @@ static int cmd_boot(boot_context_t *ctx, const char *name)
 static void cmd_store_health(void)
 {
     int nv_v = -1;
-    if (tpm_nv_fwver_read(&nv_v) != 0) nv_v = -1;
+    int nv_rc = tpm_nv_fwver_read(&nv_v);
     int uv_v = ivo_fwver_get();
 
     con_puts("tier: ");
     con_puts(core_fwver_tier() ? "TPM NV" : "UEFI variable");
     con_puts("\nnv:   ");
-    if (nv_v < 0) con_puts("-");
-    else print_uint((uint64_t)nv_v);
+    if (nv_rc == -2)        con_puts("corrupt");
+    else if (nv_rc != 0)    con_puts("-");
+    else                    print_uint((uint64_t)nv_v);
     con_puts("\nuvar: ");
-    if (uv_v == -2) con_puts("corrupt");
-    else if (uv_v < 0) con_puts("-");
-    else print_uint((uint64_t)uv_v);
+    if (uv_v == -2)         con_puts("corrupt");
+    else if (uv_v < 0)      con_puts("-");
+    else                    print_uint((uint64_t)uv_v);
     con_puts("\n");
 }
 

@@ -37,6 +37,10 @@ void  mm_free(void *ptr);
 
 int   tpm_init(void);
 int   tpm_available(void);
+/* 0 on success with *out set. -1 if no store is available (TPM
+ * absent, define or read failed). -2 if the store exists but its
+ * content is corrupt; the caller must not fall through to the UEFI
+ * tier or overwrite it. */
 int   tpm_nv_fwver_ensure(int target, int *out);
 int   tpm_nv_fwver_read(int *out);
 /* Diagnostic only. */

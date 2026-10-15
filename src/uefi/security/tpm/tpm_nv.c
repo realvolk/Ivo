@@ -127,7 +127,7 @@ int tpm_nv_fwver_ensure(int target, int *out)
         if (read_counter(&current) != 0) return -1;
     }
 
-    if (current > 0x7FFFFFFF) return -1;
+    if (current > 0x7FFFFFFF) return -2;
 
     while (current < (uint64_t)target) {
         if (cmd_nv_increment(IVO_NV_FWVER_INDEX) != 0) return -1;
@@ -143,7 +143,7 @@ int tpm_nv_fwver_read(int *out)
     if (!g_tcg2 || !out) return -1;
     uint64_t v;
     if (read_counter(&v) != 0) return -1;
-    if (v > 0x7FFFFFFF) return -1;
+    if (v > 0x7FFFFFFF) return -2;
     *out = (int)v;
     return 0;
 }

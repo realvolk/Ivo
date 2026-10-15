@@ -1,5 +1,21 @@
 # Ivo Bootloader Changelog
 
+## [v1.1.3] — 2026-10-15
+
+### Fixed
+
+- `hal_get_disk_info` reported the active partition's size as the
+  disk size. The shell's `disk` command now shows the whole disk.
+- TPM firmware-version store: a corrupt NV counter or UEFI variable
+  is now distinguished from an absent one. A corrupt store is left
+  alone; the next boot retries.
+
+### Changed
+
+- Removed dead code from the boot path: `partition_find_boot`,
+  `try_gpt`, and their helpers. The LUKS probe they performed is
+  done by `hal_init`'s block-device enumeration.
+
 ## [v1.1.2] — 2026-10-14
 
 TPM was made by masochists
@@ -22,8 +38,6 @@ TPM was made by masochists
 
 ### Fixed
 
-- `RT_SetVariable` vtable offset was wrong (0x50, not 0x58). Every
-  efivars write failed silently.
 - `PolicyGetDigest` was sent with command code `0x17E` (PCR_Read),
   failing with `TPM_RC_SIZE` on a session handle. Correct code is
   `0x189`. Oops

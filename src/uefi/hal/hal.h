@@ -65,8 +65,9 @@ void  hal_boot_uefi(const void *kernel, size_t kernel_size,
                     const void *initrd, size_t initrd_size)
                     __attribute__((noreturn));
 
-/* Set by the HAL when it has already located the boot partition.
- * partition_find_boot() is skipped if this is 1. */
+/* Set by the HAL when it has already located the boot partition
+ * (the LUKS-retarget path in hal_init). When clear, main.c falls
+ * back to boot_lba = 0, i.e. the ESP. */
 extern int hal_boot_partition_decided;
 
 #endif
