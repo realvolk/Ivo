@@ -1,0 +1,116 @@
+/* Ivo Secure Boot verification.
+ *
+ * The trust unit is the whole config file: kernel path, initrd path,
+ * cmdline, and per-file SHA-512 hashes live in config.toml, signed
+ * with Ed25519. The public key is compiled in.
+ *
+ * Without SECURE_BOOT the config is read unverified, and hashes are
+ * checked only where an entry carries them. With SECURE_BOOT the
+ * signature is checked and boot.c refuses entries missing a hash.
+ */
+
+#include "security/secure_boot.h"
+#include "core.h"
+#include "crypto/sha512.h"
+
+#define CONFIG_PATH     "/ivo/config.toml"
+#define CONFIG_SIG_PATH "/ivo/config.toml.sig"
+#define CONFIG_MAX      (64 * 1024)
+#define SIG_LEN         64
+
+static int read_config(uint8_t **buf_out, size_t *len_out)
+{
+    size_t cfg_size = 0;
+    if (fs_stat(CONFIG_PATH, &cfg_size) != 0) return CONFIG_ERR_READ;
+    if (cfg_size == 0 || cfg_size > CONFIG_MAX) return CONFIG_ERR_READ;
+
+    uint8_t *cfg = mm_alloc(cfg_size);
+    if (!cfg) return CONFIG_ERR_READ;
+
+    size_t rd = cfg_size;
+    if (fs_read(CONFIG_PATH, cfg, &rd) != 0 || rd != cfg_size) {
+        mm_free(cfg);
+        return CONFIG_ERR_READ;
+    }
+    *buf_out = cfg;
+    *len_out = cfg_size;
+    return 0;
+}
+
+int sb_hash_buffer(const uint8_t *data, size_t len,
+                   char hex_out[SB_HASH_HEX_BUF])
+{
+    static const char hexchars[] = "0123456789abcdef";
+    uint8_t digest[64];
+    sha512_ctx_t ctx;
+
+    sha512_init(&ctx);
+    if (len > 0 && data)
+        sha512_update(&ctx, data, len);
+    sha512_final(&ctx, digest);
+
+    for (int i = 0; i < 64; i++) {
+        hex_out[i * 2]     = hexchars[digest[i] >> 4];
+        hex_out[i * 2 + 1] = hexchars[digest[i] & 0x0F];
+    }
+    hex_out[SB_HASH_HEX_LEN] = '\0';
+    return 0;
+}
+
+int sb_hash_matches(const char *got_hex, const char *expected_hex)
+{
+    if (!got_hex || !expected_hex) return 0;
+    if (strlen(got_hex) != SB_HASH_HEX_LEN) return 0;
+    if (strlen(expected_hex) != SB_HASH_HEX_LEN) return 0;
+
+    uint8_t diff = 0;
+    for (int i = 0; i < SB_HASH_HEX_LEN; i++)
+        diff |= (uint8_t)(got_hex[i] ^ expected_hex[i]);
+    return diff == 0;
+}
+
+#ifndef SECURE_BOOT
+
+int sb_read_config(uint8_t **buf_out, size_t *len_out)
+{
+    return read_config(buf_out, len_out);
+}
+
+#else /* SECURE_BOOT */
+
+#include "crypto/ed25519.h"
+#include "secure_boot_pubkey.h"
+
+static int verify_signature(const uint8_t *data, size_t len,
+                            const uint8_t *sig, size_t sig_len)
+{
+    if (!data || !sig) return -1;
+    if (sig_len != SIG_LEN) return -1;
+    return ed25519_verify(sig, data, len, ivo_pubkey) ? 0 : -1;
+}
+
+int sb_read_config(uint8_t **buf_out, size_t *len_out)
+{
+    uint8_t *cfg = 0;
+    size_t cfg_size = 0;
+    if (read_config(&cfg, &cfg_size) != 0) return CONFIG_ERR_READ;
+
+    size_t sig_size = 0;
+    uint8_t sig[SIG_LEN];
+    size_t sig_len = sizeof(sig);
+    if (fs_stat(CONFIG_SIG_PATH, &sig_size) != 0 || sig_size != SIG_LEN ||
+        fs_read(CONFIG_SIG_PATH, sig, &sig_len) != 0 || sig_len != SIG_LEN) {
+        mm_free(cfg);
+        return CONFIG_ERR_SIGNATURE;
+    }
+
+    if (verify_signature(cfg, cfg_size, sig, sig_len) != 0) {
+        mm_free(cfg);
+        return CONFIG_ERR_SIGNATURE;
+    }
+    *buf_out = cfg;
+    *len_out = cfg_size;
+    return 0;
+}
+
+#endif /* SECURE_BOOT */

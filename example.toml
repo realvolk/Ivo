@@ -1,0 +1,20 @@
+# Ivo boot configuration.
+#
+# Lines starting with '#' are comments. Hash fields shown commented
+# below are required with SECURE_BOOT=1 (entries without them are
+# refused) and checked whenever present. Fill with ivo-sign --hash.
+
+timeout = 5
+default = "Artix"
+
+[entries.Artix]
+kernel = "/vmlinuz"
+initrd = "/initrd"
+options = "console=ttyS0 earlyprintk=ttyS0,keep loglevel=7 initrd=initrd label=IVO"
+# kver = ""   # SHA-512 of the kernel, filled by ivo-sign --hash
+# iver = ""   # SHA-512 of the initrd, filled by ivo-sign --hash
+
+[entries.Windows]
+type = "efi-chainload"
+path = "/EFI/Microsoft/Boot/bootmgfw.efi"
+# cver = ""   # SHA-512 of the chainload target, filled by ivo-sign --hash
