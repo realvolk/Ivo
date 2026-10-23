@@ -68,6 +68,7 @@ int   config_load(boot_context_t *ctx);
 int   core_unlocked_without_passphrase(void);
 void  core_passphrase_proven(void);
 entry_t *config_get_entries(int *count);
+void     config_clear_proven(void);
 entry_t *config_get_default(void);
 int   config_get_timeout(void);
 

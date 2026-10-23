@@ -1,5 +1,99 @@
 # Ivo Bootloader Changelog
 
+## [v1.1.5]
+
+### Changed
+
+- `menu.c`: timeout boots the selected entry, not `default`.
+- `menu.c`: text mode honors `timeout` and `ESC` to shell.
+- `password.c`: `password_proven` cleared on every return to menu.
+- `fs.c`: removed dead `fs_register`, `fs_readlink`, `fs_mount`.
+  NULL method guards on every dispatch.
+
+### Fixed
+
+- `boot.c`: `boot_failed` returned after one non-blocking
+  `hal_getchar`. Blocks now.
+- `boot.c`: `load_kernel`, `load_initrd` left dangling `entry->kernel`
+  / `entry->initrd` on failure.
+- `boot.c` / `hal/uefi.c`: `hal_chainload` reported `StartImage` failure
+  as success. `boot_chainload` printed "Chainloaded image returned" and
+  rebooted on a failed target. Both `LoadImage` and `StartImage` failures
+  now surface.
+- `config.c`: `parse_uint` overflowed before the bound check.
+- `con.c`: `con_read_secret` off-by-one on `cap - 1`, silent truncation
+  at `cap`, busy loop on `hal_getchar`.
+- `hal/uefi.c`: `hal_boot_uefi` silently booted with no cmdline if
+  `AllocatePool` failed. Now halts. `ConOut` method pointers derefed
+  without NULL checks; guarded.
+- `efivars.c`: `ivo_configver_get` returned `-1` for corrupt store,
+  inconsistent with `ivo_fwver_get`'s `-2`. The `-2` branch in
+  `main.c`'s rollback check was dead; corrupt store panicked as
+  "missing" instead of "corrupt". `ivo_var_get` guards `*DataSize >
+  cap` from misbehaving firmware.
+- `main.c`: config rollback passed with the version store missing
+  after a prior boot.
+- `luks1.c`, `luks2.c`: PBKDF2 iterations, segment offset, `iv_tweak`
+  unbounded from header. Bound at 16M, `2 × hdr_size`, `2^48`.
+- `luks2.c`: keyslot and digest counts unbounded from header. Capped
+  at 32 each.
+- `luks_common.c`: `xts_clear` skipped on `xts_init` failure;
+  `af_merge`, `luks_read_blocks` NULL and range guards; `master_key`
+  host-only.
+- `tpm.c`: `tcg2_event` missing `EFI_TCG2_EVENT_HEADER.HeaderSize`;
+  outer `HeaderSize` read 14 instead of 12. TCG event log entries
+  malformed; PCR values unaffected.
+- `lvm.c`: `\n` in quoted strings read as `n`; `\` rejected.
+  Chunk-loop and base-addition wrap windows.
+- `tpm_cmd.c` / `tpm_seal_create.c`: `cmd_load` and `cmd_create_primary`
+  read `parameterSize` as the object handle (missing `tr_params`).
+  `cmd_create_primary`'s template size 26→24 and exponent encoding
+  `tw_u32`→`tw_u16`. Object handles were wrong on spec-compliant TPMs;
+  likely masked by swtpm leniency.
+- `tpm_seal.c`: `tpm_seal_write_blob` NULL/length guards;
+  `tpm_seal_try_unlock` validates blob header before prompting for PIN;
+  policy buffer wiped after seal.
+- `fat32.c`: `fat32_write` freed the old chain before the new one was
+  durable. Now writes new, swaps entry, frees old. Cluster leak on
+  partial write fixed. Empty path components and uint32 cluster-run
+  overflow guarded.
+- `ext4.c`: `ext4_fs_opendir` NULL guards; `ext4_readdir` skips
+  dx_root blocks; `itable * block_size` and `(rel + blocks_per_group
+  - 1)` overflow guards.
+- `btrfs.c`: RAID5/RAID6 profiles misread parity as data. Rejected
+  alongside RAID0/RAID10. `btrfs_read_phys` and `btrfs_read_file`
+  offset-add overflow guards. NULL guards on `read`, `readlink`,
+  `stat`, `opendir`.
+- `iso9660.c`: `iso9660_mount` and `iso9660_mount_memory` left
+  `iso.dev`/`iso.memory` set after a failed scan. `iso_read_logical_
+  sector` derefed `iso.dev` unconditionally and dispatched through
+  LUKS/LVM, discarding `iso.dev->lba_start` — `iso-boot` with config
+  on LUKS read decrypted garbage and failed. Raw reads only now.
+- `aes.c`: `aes_init` left `ctx->nr` uninitialized on invalid key
+  length; wiped on failure. `aes_cfb128_encrypt` removed — dead code,
+  header comment claimed caller's IV advanced when it didn't. NULL
+  guards on `aes_init`, `aes_encrypt_block`, `aes_decrypt_block`.
+- `xts.c`: NULL guards on `xts_init`, `xts_encrypt_sector`,
+  `xts_decrypt_sector`. `xts_init` clears `ctx` on partial failure.
+- `hmac.c` / `hmac_sha1.c`: NULL guards on `ctx`, `key`, `data`, `out`
+  in init/update/final. Unreachable with current callers.
+- `pbkdf2.c`: `pbkdf2_hmac_sha1` bound on `out_len` matching the
+  SHA-256 variant.
+- `sha512.c`: state not wiped after `final` (SHA-256/SHA-1 both wipe);
+  added. NULL guards on `update`, `final`.
+- `sha256.c`, `sha1.c`: NULL guards. `sha1_zeroize` replaced by
+  `ivo_wipe` for the compiler barrier.
+- `blake2b.c`: NULL guards on `blake2b_init`, `blake2b_update`,
+  `blake2b_final`, `blake2b`. `blake2b_init` wipes `ctx` on invalid
+  `outlen`.
+- `argon2.c`: `initialize` and `finalize` ignored `argon2_hprime`'s
+  return. On failure (unreachable with current params), `buf` / `out`
+  were used uninitialized. Propagated to `argon2id_hash`.
+  `instance` struct zeroed after use.
+- `mm.c`: `mm_free` wiped only the payload, leaving stale `size` /
+  `next` / `free` bytes in block headers; a merge left the second
+  block's header inside the merged payload. Whole block wiped now.
+  `mm_alloc` guards `total + 4095` overflow.
 ## [v1.1.4]
 
 ### Changed

@@ -26,6 +26,7 @@
 #include "argon2.h"
 #include "blake2b.h"
 #include "argon2_internal.h"
+#include "../security/wipe.h"
 
 extern int hal_sse2_available(void);
 
@@ -441,13 +442,23 @@ static int initialize(argon2_instance *instance,
 
         store32_le(h0_with_idx + ARGON2_PREHASH_DIGEST_LENGTH, 0);
         store32_le(h0_with_idx + ARGON2_PREHASH_DIGEST_LENGTH + 4, l);
-        argon2_hprime(h0_with_idx, ARGON2_PREHASH_SEED_LENGTH,
-                      buf, ARGON2_BLOCK_SIZE);
+        if (argon2_hprime(h0_with_idx, ARGON2_PREHASH_SEED_LENGTH,
+                          buf, ARGON2_BLOCK_SIZE) != 0) {
+            secure_wipe(buf, sizeof(buf));
+            secure_wipe(h0, sizeof(h0));
+            secure_wipe(h0_with_idx, sizeof(h0_with_idx));
+            return -1;
+        }
         load_block(&instance->memory[l * instance->lane_length + 0], buf);
 
         store32_le(h0_with_idx + ARGON2_PREHASH_DIGEST_LENGTH, 1);
-        argon2_hprime(h0_with_idx, ARGON2_PREHASH_SEED_LENGTH,
-                      buf, ARGON2_BLOCK_SIZE);
+        if (argon2_hprime(h0_with_idx, ARGON2_PREHASH_SEED_LENGTH,
+                          buf, ARGON2_BLOCK_SIZE) != 0) {
+            secure_wipe(buf, sizeof(buf));
+            secure_wipe(h0, sizeof(h0));
+            secure_wipe(h0_with_idx, sizeof(h0_with_idx));
+            return -1;
+        }
         load_block(&instance->memory[l * instance->lane_length + 1], buf);
 
         secure_wipe(buf, sizeof(buf));
@@ -458,8 +469,8 @@ static int initialize(argon2_instance *instance,
     return 0;
 }
 
-static void finalize(const argon2_instance *instance,
-                     uint8_t *out, size_t out_len) {
+static int finalize(const argon2_instance *instance,
+                    uint8_t *out, size_t out_len) {
     block blockhash;
     uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
 
@@ -473,10 +484,11 @@ static void finalize(const argon2_instance *instance,
     }
 
     store_block(blockhash_bytes, &blockhash);
-    argon2_hprime(blockhash_bytes, ARGON2_BLOCK_SIZE, out, out_len);
+    int rc = argon2_hprime(blockhash_bytes, ARGON2_BLOCK_SIZE, out, out_len);
 
     secure_wipe(&blockhash, sizeof(blockhash));
     secure_wipe(blockhash_bytes, sizeof(blockhash_bytes));
+    return rc;
 }
 
 int argon2id_check_params(uint32_t t_cost, uint32_t m_cost,
@@ -520,8 +532,7 @@ int argon2id_hash(const void *pwd, size_t pwd_len,
     instance.version        = ARGON2_VERSION_13;
 
     uint64_t mem_bytes64 = (uint64_t)memory_blocks * sizeof(block);
-    if (mem_bytes64 == 0 ||
-        mem_bytes64 > (uint64_t)SIZE_MAX - ARGON2_GUARD_SIZE) {
+    if (mem_bytes64 > (uint64_t)SIZE_MAX - ARGON2_GUARD_SIZE) {
         return -1;
     }
     size_t mem_bytes   = (size_t)mem_bytes64;
@@ -551,7 +562,7 @@ int argon2id_hash(const void *pwd, size_t pwd_len,
         }
     }
 
-    finalize(&instance, out, out_len);
+    int fin_rc = finalize(&instance, out, out_len);
 
     int smashed = 0;
     for (size_t i = 0; i < ARGON2_GUARD_SIZE; i++)
@@ -559,11 +570,13 @@ int argon2id_hash(const void *pwd, size_t pwd_len,
 
     secure_wipe(raw, alloc_bytes);
     argon2_free(raw, alloc_bytes);
+    memset(&instance, 0, sizeof(instance));
 
 #ifdef CONFIG_HOST
-    return smashed ? -1 : 0;
+    if (smashed) return -1;
+    return fin_rc;
 #else
     if (smashed) panic("argon2 workspace overflow");
-    return 0;
+    return fin_rc;
 #endif
 }

@@ -81,6 +81,9 @@ int pbkdf2_hmac_sha1(const uint8_t *password, size_t password_len,
     if (iterations == 0 || out_len == 0) {
         return -1;
     }
+    if (out_len > (size_t)0xFFFFFFFFULL * SHA1_DIGEST_SIZE) {
+        return -1;
+    }
 
     size_t blocks = (out_len + SHA1_DIGEST_SIZE - 1) / SHA1_DIGEST_SIZE;
 

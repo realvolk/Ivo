@@ -49,6 +49,10 @@ extern int luks_active(void);
 #define BTRFS_BG_METADATA (1ULL << 2)
 #define BTRFS_BG_RAID0    (1ULL << 3)
 #define BTRFS_BG_RAID10   (1ULL << 6)
+#define BTRFS_BG_RAID5    (1ULL << 7)
+#define BTRFS_BG_RAID6    (1ULL << 8)
+#define BTRFS_BG_STRIPED  (BTRFS_BG_RAID0 | BTRFS_BG_RAID5 | \
+                           BTRFS_BG_RAID6 | BTRFS_BG_RAID10)
 
 #define BTRFS_FILE_EXTENT_INLINE    0
 #define BTRFS_FILE_EXTENT_REG       1
@@ -185,6 +189,7 @@ static int btrfs_read_phys(uint64_t phys, void *buf, size_t len) {
 #endif
     if (luks_active())
         return luks_read_blocks(sector, sectors, buf);
+    if (btrfs_dev->lba_start + sector < btrfs_dev->lba_start) return -1;
     return hal_read_blocks(btrfs_dev->lba_start + sector, sectors, buf);
 }
 
@@ -232,7 +237,7 @@ static int btrfs_add_chunk_from_item(const void *item, uint32_t item_size,
         item_size - BTRFS_CHUNK_HDR)
         return -1;
 
-    if (type & (BTRFS_BG_RAID0 | BTRFS_BG_RAID10)) {
+    if (type & BTRFS_BG_STRIPED) {
         con_puts("btrfs: striped profile refused\n");
         return -1;
     }
@@ -615,6 +620,7 @@ static int btrfs_lookup_dir(uint64_t dir_ino, const char *name,
 }
 
 static int btrfs_resolve(const char *path, uint64_t *out_ino) {
+    if (!path) return -1;
     btrfs_fs_root  = btrfs_default_root;
     btrfs_fs_level = btrfs_default_level;
 
@@ -786,7 +792,10 @@ static int btrfs_read_file(uint64_t ino, uint8_t *buf, size_t *len) {
             size_t take = (size_t)take64;
             if (take == 0) return -1;
 
-            uint64_t src_logical = disk_bytenr + ext_offset + skip;
+            if (disk_bytenr > UINT64_MAX - ext_offset) return -1;
+            uint64_t src_logical = disk_bytenr + ext_offset;
+            if (src_logical > UINT64_MAX - skip) return -1;
+            src_logical += skip;
             size_t   done = 0;
 
             while (done < take) {
@@ -891,6 +900,7 @@ static void btrfs_umount(void) {
 }
 
 static int btrfs_read(const char *path, uint8_t *buf, size_t *len) {
+    if (!path || !buf || !len) return -1;
     uint64_t ino;
     if (btrfs_resolve(path, &ino) < 0) return -1;
 
@@ -907,6 +917,7 @@ static int btrfs_read(const char *path, uint8_t *buf, size_t *len) {
 }
 
 static int btrfs_readlink(const char *path, char *buf, size_t len) {
+    if (!path || !buf) return -1;
     uint64_t ino;
     if (btrfs_resolve(path, &ino) < 0) return -1;
 
@@ -936,6 +947,7 @@ static int btrfs_readlink(const char *path, char *buf, size_t len) {
 }
 
 static int btrfs_stat(const char *path, struct stat *st) {
+    if (!path || !st) return -1;
     uint64_t ino;
     if (btrfs_resolve(path, &ino) < 0) return -1;
     uint64_t size;
@@ -947,6 +959,7 @@ static int btrfs_stat(const char *path, struct stat *st) {
 }
 
 static int btrfs_opendir(const char *path, void **handle) {
+    if (!path || !handle) return -1;
     uint64_t ino;
     if (btrfs_resolve(path, &ino) < 0) return -1;
 

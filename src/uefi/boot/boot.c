@@ -81,6 +81,8 @@ static int load_initrd(entry_t *entry)
         entry->initrd_size = 0;
         return 0;
     }
+    entry->initrd = 0;
+    entry->initrd_size = 0;
     size_t initrd_size = 0;
     if (fs_stat(entry->initrd_path, &initrd_size) != 0) {
         status_row(9, "Loading initrd...", "FAILED");
@@ -101,6 +103,8 @@ static int load_initrd(entry_t *entry)
         why = "BAD HASH";
     if (why) {
         hal_free_pages(buf, pages);
+        entry->initrd = 0;
+        entry->initrd_size = 0;
         status_row(9, "Loading initrd...", why);
         frame_row(10, entry->initrd_path, theme_current.fg_dim);
         return -1;
@@ -145,6 +149,8 @@ static int load_kernel(entry_t *entry)
     entry->kernel_size = kernel_size;
     if (load_initrd(entry) != 0) {
         hal_free_pages(tmp, kernel_pages);
+        entry->kernel = 0;
+        entry->kernel_size = 0;
         return -1;
     }
     return 0;
@@ -154,7 +160,7 @@ static int boot_failed(const char *msg)
 {
     status_row(11, msg, "FAILED");
     frame_row(12, "Press any key to return to the menu.", theme_current.fg_dim);
-    hal_getchar();
+    while (hal_getchar_timeout(10) == 0) { }
     return 0;
 }
 
@@ -191,7 +197,10 @@ static int boot_chainload(entry_t *entry)
     con_puts("...\n");
     ivo_bootcount_clear();
     luks_wipe_keys();
-    hal_chainload(buf, efi_size);
+    if (hal_chainload(buf, efi_size) != 0) {
+        con_puts("chainload failed\n");
+        return -1;
+    }
     con_puts("Chainloaded image returned. Rebooting.\n");
     hal_reboot();
     return -1;

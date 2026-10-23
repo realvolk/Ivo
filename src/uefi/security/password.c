@@ -43,8 +43,9 @@ static int parse_stored(const char *s, uint32_t *iter_out,
     if (*s < '0' || *s > '9') return -1;
     uint32_t iter = 0;
     while (*s >= '0' && *s <= '9') {
-        iter = iter * 10 + (uint32_t)(*s - '0');
-        if (iter > 10000000u) return -1;
+        uint32_t digit = (uint32_t)(*s - '0');
+        if (iter > (10000000u - digit) / 10u) return -1;
+        iter = iter * 10u + digit;
         s++;
     }
     if (iter == 0) return -1;

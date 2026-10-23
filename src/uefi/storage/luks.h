@@ -32,7 +32,9 @@ int    luks_active(void);
 void   luks_suspend(int on);
 int    luks_read_block(uint64_t lba, uint8_t *buf);
 int    luks_read_blocks(uint64_t lba, uint32_t count, uint8_t *buf);
+#ifdef CONFIG_HOST
 int    luks_get_master_key(uint8_t *out, size_t *len);
+#endif
 void   luks_wipe_keys(void);
 
 #endif

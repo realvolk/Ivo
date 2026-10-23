@@ -227,7 +227,7 @@ void hal_puts_serial(const char *s)
 void hal_putchar(char c)
 {
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *co = g_st ? g_st->ConOut : g_con_out;
-    if (!co) return;
+    if (!co || !co->OutputString) return;
 
     if (c == '\b') {
         if (g_cursor_x > 0) g_cursor_x--;
@@ -538,12 +538,6 @@ void hal_init(boot_context_t *ctx)
     if (bs_locate_protocol(&GUID_GOP, &gop) == EFI_SUCCESS && gop)
         g_gop = (EFI_GRAPHICS_OUTPUT_PROTOCOL *)gop;
 
-    g_mmap_size = 0;
-    g_mmap_key = 0;
-    g_mmap_desc_size = 0;
-    g_mmap_desc_ver = 0;
-    bs_get_memory_map();
-
     g_initrd_proto.LoadFile = efi_load_file2;
 }
 
@@ -758,7 +752,7 @@ void hal_clear_screen(void)
 {
     g_cursor_x = 0;
     g_cursor_y = 0;
-    if (!g_con_out) return;
+    if (!g_con_out || !g_con_out->ClearScreen) return;
     EFI_STATUS (*fn)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *) =
         (EFI_STATUS (*)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *))
         g_con_out->ClearScreen;
@@ -767,7 +761,7 @@ void hal_clear_screen(void)
 
 void hal_set_attr(uint8_t fg, uint8_t bg)
 {
-    if (!g_con_out) return;
+    if (!g_con_out || !g_con_out->SetAttribute) return;
     EFI_STATUS (*fn)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *, size_t) =
         (EFI_STATUS (*)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *, size_t))
         g_con_out->SetAttribute;
@@ -778,7 +772,7 @@ void hal_set_cursor(int x, int y)
 {
     g_cursor_x = x;
     g_cursor_y = y;
-    if (!g_con_out) return;
+    if (!g_con_out || !g_con_out->SetCursorPosition) return;
     EFI_STATUS (*fn)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *, size_t, size_t) =
         (EFI_STATUS (*)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *, size_t, size_t))
         g_con_out->SetCursorPosition;
@@ -966,6 +960,10 @@ int hal_chainload(void *data, size_t size)
     EFI_STATUS (*start_image)(EFI_HANDLE, uint64_t *, CHAR16 **) =
         *(void **)((uint8_t *)bs + BS_StartImage);
     s = start_image(new_handle, 0, 0);
+    if (s != EFI_SUCCESS) {
+        puts_("chainload: StartImage failed\n");
+        return -1;
+    }
 
     puts_("chainload: StartImage returned\n");
     return 0;

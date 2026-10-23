@@ -346,5 +346,5 @@ void shell_enter(boot_context_t *ctx)
             con_puts(cmd);
             con_puts("\n");
         }
-    }d
+    }
 }

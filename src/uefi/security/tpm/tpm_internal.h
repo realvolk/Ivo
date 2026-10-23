@@ -93,5 +93,8 @@ int  tpm_policy_pcr(uint32_t session, uint32_t pcr_mask);
 int  tpm_policy_password(uint32_t session);
 void tpm_flush(uint32_t handle);
 int  tpm_policy_get_digest(uint32_t session, uint8_t *out, size_t *out_len);
+int  tpm2_unseal(const uint8_t *blob, size_t blob_len,
+                 const uint8_t *pin, size_t pin_len,
+                 uint8_t *out, size_t *out_len);
 
 #endif

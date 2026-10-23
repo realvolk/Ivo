@@ -427,7 +427,7 @@ int fat32_read(const char *path, uint8_t *buf, size_t *len)
         const char *slash = p;
         while (*slash && *slash != '/') slash++;
         size_t comp_len = (size_t)(slash - p);
-        if (comp_len > 255) return -1;
+        if (comp_len == 0 || comp_len > 255) return -1;
         memcpy(component, p, comp_len);
         component[comp_len] = '\0';
 
@@ -459,7 +459,7 @@ int fat32_read(const char *path, uint8_t *buf, size_t *len)
                 uint32_t run_clusters = 1;
                 uint32_t next = next_cluster(cluster);
                 while (run_clusters < want_clusters &&
-                       next == cluster + run_clusters) {
+                       (uint64_t)next == (uint64_t)cluster + run_clusters) {
                     run_clusters++;
                     next = next_cluster(next);
                 }
@@ -503,7 +503,7 @@ int fat32_stat(const char *path, struct stat *st)
         const char *slash = p;
         while (*slash && *slash != '/') slash++;
         size_t comp_len = (size_t)(slash - p);
-        if (comp_len > 255) return -1;
+        if (comp_len == 0 || comp_len > 255) return -1;
         memcpy(component, p, comp_len);
         component[comp_len] = '\0';
 
@@ -769,7 +769,7 @@ int fat32_write(const char *path, const uint8_t *data, size_t size)
         const char *slash = p;
         while (*slash && *slash != '/') slash++;
         size_t comp_len = (size_t)(slash - p);
-        if (comp_len > 255) return -1;
+        if (comp_len == 0 || comp_len > 255) return -1;
         memcpy(component, p, comp_len);
         component[comp_len] = '\0';
 
@@ -786,25 +786,30 @@ int fat32_write(const char *path, const uint8_t *data, size_t size)
             char name83[11];
             if (fat32_make_83(component, name83) != 0) return -1;
 
-            uint32_t file_cluster = 0;
-            uint32_t file_size = 0;
-            uint8_t file_attr = 0;
+            uint32_t old_cluster = 0;
+            uint32_t old_size = 0;
+            uint8_t  old_attr = 0;
             uint32_t loc_cluster = 0, loc_index = 0;
 
-            if (find_entry(dir_cluster, component, &file_cluster,
-                           &file_size, &file_attr,
+            if (find_entry(dir_cluster, component, &old_cluster,
+                           &old_size, &old_attr,
                            &loc_cluster, &loc_index) == 0) {
-                if (file_attr & (ATTR_DIRECTORY | ATTR_VOLUME_ID)) return -1;
-                free_chain(file_cluster);
+                if (old_attr & (ATTR_DIRECTORY | ATTR_VOLUME_ID)) return -1;
             }
 
-            file_cluster = alloc_cluster();
+            uint32_t file_cluster = alloc_cluster();
             if (file_cluster == 0) return -1;
 
-            if (write_file_data(file_cluster, data, size) != 0) return -1;
-            if (write_dir_entry(dir_cluster, name83, loc_cluster, loc_index,
-                                file_cluster, (uint32_t)size) != 0)
+            if (write_file_data(file_cluster, data, size) != 0) {
+                free_chain(file_cluster);
                 return -1;
+            }
+            if (write_dir_entry(dir_cluster, name83, loc_cluster, loc_index,
+                                file_cluster, (uint32_t)size) != 0) {
+                free_chain(file_cluster);
+                return -1;
+            }
+            if (old_cluster) free_chain(old_cluster);
             return write_fat();
         }
         p = slash + (*slash ? 1 : 0);

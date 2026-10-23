@@ -81,6 +81,7 @@ static void sha256_transform(struct sha256_ctx *ctx, const uint8_t block[64]) {
 }
 
 void sha256_init(struct sha256_ctx *ctx) {
+    if (!ctx) return;
     ctx->state[0] = 0x6a09e667;
     ctx->state[1] = 0xbb67ae85;
     ctx->state[2] = 0x3c6ef372;
@@ -94,6 +95,7 @@ void sha256_init(struct sha256_ctx *ctx) {
 }
 
 void sha256_update(struct sha256_ctx *ctx, const uint8_t *data, size_t len) {
+    if (!ctx || (!data && len)) return;
     ctx->bitlen += (uint64_t)len * 8;
 
     if (ctx->buflen > 0) {
@@ -122,6 +124,7 @@ void sha256_update(struct sha256_ctx *ctx, const uint8_t *data, size_t len) {
 }
 
 void sha256_final(struct sha256_ctx *ctx, uint8_t out[SHA256_DIGEST_SIZE]) {
+    if (!ctx || !out) return;
     uint64_t bitlen = ctx->bitlen;
 
     uint8_t pad = 0x80;
@@ -147,6 +150,7 @@ void sha256_final(struct sha256_ctx *ctx, uint8_t out[SHA256_DIGEST_SIZE]) {
 }
 
 void sha256(const uint8_t *data, size_t len, uint8_t out[SHA256_DIGEST_SIZE]) {
+    if (!out) return;
     struct sha256_ctx ctx;
     sha256_init(&ctx);
     sha256_update(&ctx, data, len);

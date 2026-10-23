@@ -105,7 +105,9 @@ static void compress(struct blake2b_ctx *ctx,
 }
 
 int blake2b_init(struct blake2b_ctx *ctx, size_t outlen) {
+    if (!ctx) return -1;
     if (outlen == 0 || outlen > BLAKE2B_MAX_DIGEST) {
+        ivo_wipe(ctx, sizeof(*ctx));
         return -1;
     }
 
@@ -121,6 +123,7 @@ int blake2b_init(struct blake2b_ctx *ctx, size_t outlen) {
 }
 
 int blake2b_update(struct blake2b_ctx *ctx, const uint8_t *data, size_t len) {
+    if (!ctx || (!data && len)) return -1;
     if (len == 0) return 0;
 
     while (len > 0) {
@@ -144,6 +147,7 @@ int blake2b_update(struct blake2b_ctx *ctx, const uint8_t *data, size_t len) {
 }
 
 int blake2b_final(struct blake2b_ctx *ctx, uint8_t out[BLAKE2B_MAX_DIGEST]) {
+    if (!ctx || !out) return -1;
     uint8_t buffer[BLAKE2B_MAX_DIGEST];
 
     ctx->t[0] += ctx->buflen;
@@ -168,6 +172,7 @@ int blake2b_final(struct blake2b_ctx *ctx, uint8_t out[BLAKE2B_MAX_DIGEST]) {
 
 int blake2b(const uint8_t *data, size_t len,
             uint8_t out[BLAKE2B_MAX_DIGEST], size_t outlen) {
+    if (!out || (!data && len)) return -1;
     struct blake2b_ctx ctx;
     if (blake2b_init(&ctx, outlen) != 0) return -1;
     blake2b_update(&ctx, data, len);

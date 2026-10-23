@@ -18,6 +18,8 @@ void hmac_sha256_init(struct hmac_sha256_ctx *ctx,
     uint8_t ipad[SHA256_BLOCK_SIZE];
     uint8_t opad[SHA256_BLOCK_SIZE];
 
+    if (!ctx) return;
+    if (!key && key_len) return;
     if (key_len > SHA256_BLOCK_SIZE) {
         sha256(key, key_len, k);
         memset(k + SHA256_DIGEST_SIZE, 0, SHA256_BLOCK_SIZE - SHA256_DIGEST_SIZE);

@@ -26,7 +26,8 @@ typedef EFI_STATUS (*efi_tcg2_hash_log_extend_fn)(
 struct tcg2_event {
     uint32_t Size;
     uint32_t HeaderSize;
-    uint16_t HeaderVersion;
+    uint16_t HdrSize;
+    uint16_t HdrVersion;
     uint32_t PCRIndex;
     uint32_t EventType;
     uint8_t  Event[1];
@@ -59,15 +60,17 @@ void tpm_measure(uint32_t pcr, const uint8_t *data, size_t len)
     if (!data || len == 0) return;
 
     struct tcg2_event ev;
-    ev.Size          = sizeof(ev);
-    ev.HeaderSize    = 14;
-    ev.HeaderVersion = 1;
-    ev.PCRIndex      = pcr;
-    ev.EventType     = EV_EFI_BOOT_SERVICES_APPLICATION;
-    ev.Event[0]      = 0;
+    ev.Size       = sizeof(ev);
+    ev.HeaderSize = 12;
+    ev.HdrSize    = 12;
+    ev.HdrVersion = 1;
+    ev.PCRIndex   = pcr;
+    ev.EventType  = EV_EFI_BOOT_SERVICES_APPLICATION;
+    ev.Event[0]   = 0;
 
     efi_tcg2_hash_log_extend_fn fn =
         (efi_tcg2_hash_log_extend_fn)((void **)g_tcg2)[2];
+    if (!fn) return;
 
     (void)fn(g_tcg2, 0,
              (uint64_t)(uintptr_t)data, (uint64_t)len, &ev);

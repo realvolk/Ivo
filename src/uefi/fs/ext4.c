@@ -374,6 +374,7 @@ static int ext4_read_inode(uint32_t ino, struct ext4_inode *out)
 
     uint64_t itable = ((uint64_t)gd.bg_inode_table_hi << 32)
                     | (uint64_t)gd.bg_inode_table_lo;
+    if (itable > (uint64_t)-1 / ext4.block_size) return -1;
     uint64_t byte = itable * ext4.block_size
                   + (uint64_t)index * ext4.inode_size;
     uint64_t block = byte / ext4.block_size;
@@ -903,8 +904,7 @@ static int ext4_fs_mount(block_device_t *dev)
     if (ext4.total_blocks <= ext4.first_data_block) return -1;
 
     uint64_t rel = ext4.total_blocks - ext4.first_data_block;
-    uint64_t groups = (rel + ext4.blocks_per_group - 1)
-                    / ext4.blocks_per_group;
+    uint64_t groups = (rel - 1) / ext4.blocks_per_group + 1;
     if (groups == 0 || groups > 0xFFFFFFFFull) return -1;
     ext4.groups_count = (uint32_t)groups;
     ext4.gdt_block = ext4.first_data_block + 1;
@@ -959,6 +959,7 @@ typedef struct {
 
 static int ext4_fs_opendir(const char *path, void **handle)
 {
+    if (!path || !handle) return -1;
     struct ext4_inode ino;
     uint32_t ino_num;
     if (ext4_resolve(path, &ino, &ino_num) != 0) return -1;
@@ -991,7 +992,8 @@ static int ext4_fs_readdir(void *handle, char *name, size_t name_len)
         if (ext4_bmap(&dir, lb, &pb) != 0) return -1;
         if (ext4_read_block(pb, ext4_io_buf) != 0) return -1;
 
-        if (is_htree && boff == 0 && ext4_is_dx_node(ext4_io_buf)) {
+        if (is_htree && boff == 0 &&
+            (ext4_is_dx_node(ext4_io_buf) || ext4_is_dx_root(ext4_io_buf))) {
             h->offset = ((h->offset / ext4.block_size) + 1) * ext4.block_size;
             continue;
         }

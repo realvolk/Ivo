@@ -40,7 +40,7 @@ int ivo_var_get(const char *name, uint8_t *buf, size_t *len, size_t cap)
     uint32_t attrs = 0;
     size_t got = cap;
     EFI_STATUS s = get(wname, &IVO_GUID, &attrs, &got, buf);
-    if (s != EFI_SUCCESS) return -1;
+    if (s != EFI_SUCCESS || got > cap) return -1;
     *len = got;
     return 0;
 }
@@ -147,10 +147,10 @@ int ivo_configver_get(void)
     size_t len = 0;
     if (ivo_var_get(CONFIGVER_VAR, buf, &len, sizeof(buf)) != 0)
         return -1;
-    if (len != 4) return -1;
+    if (len != 4) return -2;
     int32_t v = (int32_t)(buf[0] | (buf[1] << 8) |
                           (buf[2] << 16) | ((uint32_t)buf[3] << 24));
-    if (v < 0) return -1;
+    if (v < 0) return -2;
     return (int)v;
 }
 

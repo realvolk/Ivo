@@ -33,15 +33,19 @@ static void make_tweak(const struct xts_ctx *ctx, uint64_t sector_num,
 }
 
 int xts_init(struct xts_ctx *ctx, const uint8_t *key, size_t key_len) {
+    if (!ctx || !key) return -1;
     if (key_len != AES128_KEY_SIZE * 2 && key_len != AES256_KEY_SIZE * 2) {
         return -1;
     }
 
     size_t half = key_len / 2;
 
-    if (aes_init(&ctx->data,  key,      half) != 0) return -1;
+    if (aes_init(&ctx->data,  key,      half) != 0) {
+        xts_clear(ctx);
+        return -1;
+    }
     if (aes_init(&ctx->tweak, key + half, half) != 0) {
-        aes_clear(&ctx->data);
+        xts_clear(ctx);
         return -1;
     }
     return 0;
@@ -55,6 +59,7 @@ void xts_clear(struct xts_ctx *ctx) {
 
 int xts_encrypt_sector(const struct xts_ctx *ctx, uint64_t sector_num,
                        const uint8_t *in, uint8_t *out, size_t len) {
+    if (!ctx || !in || !out) return -1;
     if (len == 0 || (len % AES_BLOCK_SIZE) != 0) {
         return -1;
     }
@@ -78,6 +83,7 @@ int xts_encrypt_sector(const struct xts_ctx *ctx, uint64_t sector_num,
 
 int xts_decrypt_sector(const struct xts_ctx *ctx, uint64_t sector_num,
                        const uint8_t *in, uint8_t *out, size_t len) {
+    if (!ctx || !in || !out) return -1;
     if (len == 0 || (len % AES_BLOCK_SIZE) != 0) {
         return -1;
     }

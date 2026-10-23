@@ -105,6 +105,7 @@ void *mm_alloc(size_t size)
     if (!b) b = list_alloc(&page_free, total);
 
     if (!b) {
+        if (total > SIZE_MAX - 4095) return NULL;
         size_t pages = (total + 4095) / 4096;
         uint8_t *base = (uint8_t *)hal_allocate_pages(pages);
         if (!base) return NULL;
@@ -139,7 +140,8 @@ void mm_free(void *p)
 
     size_t sz = b->size;
     uint8_t *raw = (uint8_t *)b;
-    for (size_t i = HDR_SIZE; i < sz; i++) raw[i] = 0;
+    for (size_t i = 0; i < sz; i++) raw[i] = 0;
+    b->size = sz;
 
     if (in_small_heap(b)) list_insert(&small_free, b);
     else                  list_insert(&page_free, b);

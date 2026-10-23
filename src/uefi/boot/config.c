@@ -98,8 +98,9 @@ static int parse_uint(const char *v, int max, int *out)
     int n = 0;
     if (*d < '0' || *d > '9') return -1;
     while (*d >= '0' && *d <= '9') {
-        n = n * 10 + (*d - '0');
-        if (n > max) return -1;
+        int digit = *d - '0';
+        if (n > (max - digit) / 10) return -1;
+        n = n * 10 + digit;
         d++;
     }
     if (!rest_is_empty(d)) return -1;
@@ -284,8 +285,9 @@ int config_parse(const char *data, size_t len)
     }
 
     if (current_entry && entry_complete(current_entry) != 0) return -1;
+    if (entry_count == 0) return -1;
     error_line = 0;
-    return entry_count > 0 ? 0 : -1;
+    return 0;
 }
 
 int config_error_line(void)
@@ -322,6 +324,12 @@ entry_t *config_get_entries(int *count)
 {
     *count = entry_count;
     return entries;
+}
+
+void config_clear_proven(void)
+{
+    for (int i = 0; i < entry_count; i++)
+        entries[i].password_proven = 0;
 }
 
 entry_t *config_get_default(void)

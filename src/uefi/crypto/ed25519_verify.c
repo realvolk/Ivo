@@ -65,6 +65,7 @@ int ed25519_verify(const unsigned char *signature, const unsigned char *message,
     ge_p3 A;
     ge_p2 R;
 
+    if (!signature || !public_key || (!message && message_len)) return 0;
     if (!sc_is_canonical(signature + 32)) {
         return 0;
     }

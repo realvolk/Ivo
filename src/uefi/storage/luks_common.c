@@ -21,8 +21,10 @@
 #include "crypto/pbkdf2.h"
 #include "crypto/xts.h"
 
+#ifdef CONFIG_HOST
 static uint8_t master_key[LUKS_MAX_KEY];
 static size_t  master_key_len;
+#endif
 static int     luks_initialized;
 
 static uint64_t luks_part_lba;
@@ -106,6 +108,7 @@ static void af_diffuse(uint8_t *buf, size_t size, int hash)
 int af_merge(const uint8_t *area, size_t area_len, uint32_t stripes,
              size_t key_size, int hash, uint8_t *out)
 {
+    if (!area || !out) return -1;
     if (stripes < 1 || stripes > LUKS_AF_MAX_STRIPES) return -1;
     if (key_size == 0 || key_size > LUKS_MAX_KEY) return -1;
     if (luks_hash_size(hash) == 0) return -1;
@@ -143,6 +146,7 @@ int luks_keyslot_merge(uint64_t lba,
 
     int rc = -1;
     struct xts_ctx xts;
+    memset(&xts, 0, sizeof(xts));
     if (luks_read_raw(lba, sectors, m) == 0 &&
         xts_init(&xts, slot_key, slot_key_len) == 0) {
         rc = 0;
@@ -150,10 +154,10 @@ int luks_keyslot_merge(uint64_t lba,
             uint8_t *p = m + (size_t)s * 512;
             rc = xts_decrypt_sector(&xts, s, p, p, 512);
         }
-        xts_clear(&xts);
         if (rc == 0)
             rc = af_merge(m, (size_t)bytes, stripes, mk_len, af_hash, mk_out);
     }
+    xts_clear(&xts);
 
     ivo_wipe(m, alloc);
     mm_free(m);
@@ -180,9 +184,8 @@ int luks_enabled(boot_context_t *ctx)
 int luks_read_passphrase(const char *label, char *buf, size_t cap)
 {
     int n = con_read_secret(label, buf, cap, '*');
-    if (n < 0 || (size_t)n + 1 >= cap) {
+    if (n < 0) {
         ivo_wipe(buf, cap);
-        con_puts("Input too long.\n");
         return -1;
     }
     return n;
@@ -192,6 +195,10 @@ void luks_set_payload(uint64_t part_lba, uint64_t payload_offset_sectors)
 {
     luks_part_lba       = part_lba;
     luks_payload_offset = payload_offset_sectors;
+    if (part_lba + payload_offset_sectors < part_lba) {
+        luks_part_lba       = 0;
+        luks_payload_offset = ~(uint64_t)0;
+    }
 }
 
 int luks_set_segment(uint32_t sector_size, uint64_t iv_tweak)
@@ -213,8 +220,10 @@ int luks_setup_crypto(const uint8_t *mk, size_t mk_len, const char *cipher_spec)
     if (mk_len != 32 && mk_len != 64) return -1;
 
     if (xts_init(&luks_xts, mk, mk_len) != 0) return -1;
+#ifdef CONFIG_HOST
     memcpy(master_key, mk, mk_len);
-    master_key_len   = mk_len;
+    master_key_len = mk_len;
+#endif
     luks_initialized = 1;
     luks_xts_ready   = 1;
     return 0;
@@ -224,8 +233,10 @@ void luks_wipe_keys(void)
 {
     luks_initialized = 0;
     luks_xts_ready   = 0;
+#ifdef CONFIG_HOST
     master_key_len   = 0;
     ivo_wipe(master_key, sizeof(master_key));
+#endif
     ivo_wipe(&luks_xts, sizeof(luks_xts));
     ivo_wipe(luks_unit, sizeof(luks_unit));
 }
@@ -239,7 +250,9 @@ static int decrypt_unit(uint64_t unit, uint8_t *p)
 
 int luks_read_blocks(uint64_t lba, uint32_t count, uint8_t *buf)
 {
+    if (!buf && count) return -1;
     if (!luks_active()) return -1;
+    if (lba + (uint64_t)count < lba) return -1;
 
     uint32_t spu  = luks_sector_size / 512;
     uint64_t base = luks_part_lba + luks_payload_offset;
@@ -314,6 +327,7 @@ int luks_unlock_with_passphrase(boot_context_t *ctx,
 }
 #endif /* !CONFIG_HOST */
 
+#ifdef CONFIG_HOST
 int luks_get_master_key(uint8_t *out, size_t *len)
 {
     if (!luks_initialized || !out || !len) return -1;
@@ -322,3 +336,4 @@ int luks_get_master_key(uint8_t *out, size_t *len)
     *len = master_key_len;
     return 0;
 }
+#endif

@@ -30,6 +30,7 @@ extern int argon2id(const uint8_t *password, size_t pw_len,
 #define LUKS2_CSUM_OFF    448
 #define LUKS2_CSUM_LEN    64
 #define LUKS2_AREA_MAX    (16u * 1024 * 1024)
+#define LUKS_MAX_PBKDF2_ITERS (16u * 1024 * 1024)
 
 struct luks2_hdr {
     struct json_value *root;
@@ -102,7 +103,7 @@ static int luks2_read_copy(boot_context_t *ctx, uint64_t off,
     if (be64(bin + 256) != off) return -1;    /* hdr_offset */
     if (memcmp(bin + 72, "sha256", 7) != 0) return -1;
 
-    uint8_t *buf = (uint8_t *)mm_alloc((size_t)size + 1);
+    uint8_t *buf = (uint8_t *)mm_alloc((size_t)size);
     if (!buf) return -1;
 
     int rc = -1;
@@ -161,6 +162,7 @@ static int luks2_load_header(boot_context_t *ctx, struct luks2_hdr *hdr)
 }
 
 static int luks2_get_segment(const struct json_value *root,
+                             uint64_t hdr_size,
                              struct luks2_seg *seg)
 {
     const struct json_value *segs = jget(root, "segments");
@@ -179,7 +181,10 @@ static int luks2_get_segment(const struct json_value *root,
     }
     if (ju64(s, "offset", &seg->offset) != 0 || seg->offset % 512 != 0)
         return -1;
-    if (ju64(s, "iv_tweak", &seg->iv_tweak) != 0) return -1;
+    if (seg->offset < 2 * hdr_size || seg->offset > (1ull << 48))
+        return -1;
+    if (ju64(s, "iv_tweak", &seg->iv_tweak) != 0 ||
+        seg->iv_tweak > (1ull << 48)) return -1;
     if (ju64(s, "sector_size", &ss) != 0 ||
         (ss != 512 && ss != 1024 && ss != 2048 && ss != 4096)) return -1;
     seg->sector_size = (uint32_t)ss;
@@ -193,18 +198,22 @@ static int luks2_verify_digest(const struct json_value *root,
     const struct json_value *digests = jget(root, "digests");
     int verified = 0;
 
-    for (size_t i = 0; i < json_object_count(digests) && !verified; i++) {
+    size_t nd = json_object_count(digests);
+    if (nd > 32) return -1;
+    for (size_t i = 0; i < nd && !verified; i++) {
         const struct json_value *d = json_object_value_at(digests, i);
         if (!jstr_eq(d, "type", "pbkdf2")) continue;
         if (!array_lists(jget(d, "keyslots"), slot_id)) continue;
         if (!array_lists(jget(d, "segments"), seg_id)) continue;
 
-        int hash = luks_hash_id(json_string(jget(d, "hash")));
+        const char *hash_name = json_string(jget(d, "hash"));
+        if (!hash_name) continue;
+        int hash = luks_hash_id(hash_name);
         size_t hlen = luks_hash_size(hash);
         uint64_t iters = 0;
         if (hlen == 0) continue;
         if (ju64(d, "iterations", &iters) != 0 ||
-            iters == 0 || iters > 0xFFFFFFFFu) continue;
+            iters == 0 || iters > LUKS_MAX_PBKDF2_ITERS) continue;
 
         uint8_t salt[64];
         size_t salt_len = sizeof(salt);
@@ -247,10 +256,12 @@ static int luks2_kdf(const struct json_value *kdf,
                         (uint32_t)t, (uint32_t)m, (uint32_t)p, out, out_len);
     }
     if (jstr_eq(kdf, "type", "pbkdf2")) {
-        int hash = luks_hash_id(json_string(jget(kdf, "hash")));
+        const char *hash_name = json_string(jget(kdf, "hash"));
+        if (!hash_name) return -1;
+        int hash = luks_hash_id(hash_name);
         uint64_t iters;
         if (hash < 0 || ju64(kdf, "iterations", &iters) != 0 ||
-            iters == 0 || iters > 0xFFFFFFFFu) return -1;
+            iters == 0 || iters > LUKS_MAX_PBKDF2_ITERS) return -1;
         return luks_pbkdf2(hash, pass, pass_len, salt, salt_len,
                            (uint32_t)iters, out, out_len);
     }
@@ -322,7 +333,7 @@ int luks2_unlock_with_passphrase(boot_context_t *ctx,
     struct luks2_hdr hdr;
     struct luks2_seg seg;
     if (luks2_load_header(ctx, &hdr) != 0) return -1;
-    if (luks2_get_segment(hdr.root, &seg) != 0) {
+    if (luks2_get_segment(hdr.root, hdr.hdr_size, &seg) != 0) {
         luks2_free_header(&hdr);
         return -1;
     }
@@ -333,6 +344,10 @@ int luks2_unlock_with_passphrase(boot_context_t *ctx,
     int rc = -1;
 
     size_t n = json_object_count(keyslots);
+    if (n > 32) {
+        luks2_free_header(&hdr);
+        return -1;
+    }
     for (uint64_t prio = 2; prio >= 1 && rc != 0; prio--) {
         for (size_t i = 0; i < n && rc != 0; i++) {
             const struct json_value *slot = json_object_value_at(keyslots, i);
@@ -345,11 +360,12 @@ int luks2_unlock_with_passphrase(boot_context_t *ctx,
     luks2_free_header(&hdr);
 
     if (rc == 0) {
-        luks_set_payload(ctx->boot_lba, seg.offset / 512);
-        rc = luks_set_segment(seg.sector_size, seg.iv_tweak);
-    }
-    if (rc == 0)
         rc = luks_setup_crypto(mk, mk_len, "aes-xts-plain64");
+        if (rc == 0) {
+            luks_set_payload(ctx->boot_lba, seg.offset / 512);
+            luks_set_segment(seg.sector_size, seg.iv_tweak);
+        }
+    }
     ivo_wipe(mk, sizeof(mk));
     return rc;
 }

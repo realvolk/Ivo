@@ -26,6 +26,7 @@
 #define LUKS1_KEY_ENABLED   0x00AC71F3u
 #define LUKS1_DIGEST_SIZE   20
 #define LUKS1_SALT_SIZE     32
+#define LUKS_MAX_PBKDF2_ITERS (16u * 1024 * 1024)
 
 #pragma pack(push, 1)
 typedef struct {
@@ -105,7 +106,9 @@ int luks1_unlock_with_passphrase(boot_context_t *ctx,
         con_puts("LUKS1: unsupported hash (need sha1 or sha256)\n");
         return -1;
     }
-    if (hdr.mk_digest_iter == 0) return -1;
+    if (hdr.mk_digest_iter == 0 || hdr.mk_digest_iter > LUKS_MAX_PBKDF2_ITERS)
+        return -1;
+    if (hdr.payload_offset == 0) return -1;
 
     size_t  key_len = hdr.key_bytes;
     uint8_t slot_key[LUKS_MAX_KEY];
@@ -119,12 +122,11 @@ int luks1_unlock_with_passphrase(boot_context_t *ctx,
         const uint32_t km_off  = hdr.keyslot[slot].key_material_offset;
 
         if (hdr.keyslot[slot].active != LUKS1_KEY_ENABLED) continue;
-        if (iters == 0 || stripes == 0 || stripes > LUKS_AF_MAX_STRIPES)
-            continue;
+        if (iters == 0 || iters > LUKS_MAX_PBKDF2_ITERS) continue;
+        if (stripes == 0 || stripes > LUKS_AF_MAX_STRIPES) continue;
         uint64_t km_sectors = ((uint64_t)key_len * stripes + 511) / 512;
         if (km_off < 2) continue;
-        if (hdr.payload_offset != 0 &&
-            (uint64_t)km_off + km_sectors > hdr.payload_offset) continue;
+        if ((uint64_t)km_off + km_sectors > hdr.payload_offset) continue;
 
         if (luks_pbkdf2(hash, pass, pass_len,
                         hdr.keyslot[slot].salt, LUKS1_SALT_SIZE, iters,
@@ -147,9 +149,11 @@ int luks1_unlock_with_passphrase(boot_context_t *ctx,
 
     int rc = -1;
     if (found) {
-        luks_set_payload(ctx->boot_lba, hdr.payload_offset);
-        luks_set_segment(512, 0);
         rc = luks_setup_crypto(mk, key_len, "aes-xts-plain64");
+        if (rc == 0) {
+            luks_set_payload(ctx->boot_lba, hdr.payload_offset);
+            luks_set_segment(512, 0);
+        }
     }
     ivo_wipe(mk, sizeof(mk));
     return rc;

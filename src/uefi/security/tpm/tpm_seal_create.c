@@ -43,7 +43,7 @@ static int cmd_create_primary(uint32_t *handle_out)
     tw_u16(&w, 0);
     tw_u16(&w, 0);
 
-    tw_u16(&w, 26);
+    tw_u16(&w, 24);
     tw_u16(&w, TPM_ALG_RSA);
     tw_u16(&w, TPM_ALG_SHA256);
     tw_u32(&w, SRK_ATTRS);
@@ -53,7 +53,7 @@ static int cmd_create_primary(uint32_t *handle_out)
     tw_u16(&w, TPM_ALG_CFB);         /* mode */
     tw_u16(&w, TPM_ALG_NULL);        /* RSA scheme */
     tw_u16(&w, 2048);                /* RSA key size */
-    tw_u32(&w, 0);                   /* exponent (default) */
+    tw_u16(&w, 0);                   /* exponent: empty = default 65537 */
     tw_u16(&w, 0);                   /* unique: empty for CreatePrimary */
 
     tw_u16(&w, 0);                   /* outsideInfo */
@@ -61,8 +61,9 @@ static int cmd_create_primary(uint32_t *handle_out)
 
     if (tpm_transact(&w, rsp, sizeof(rsp), &r, "createprimary") != 0)
         return -1;
+    tr_params(&r);
     uint32_t h = tr_u32(&r);
-    if (r.err) return -1;
+    if (r.err || h == 0) return -1;
     *handle_out = h;
     return 0;
 }
@@ -210,6 +211,7 @@ int tpm2_seal_create(const uint8_t *secret, size_t secret_len,
     b[20] = (uint8_t)(out_pub_len >> 8);
     memcpy(b + IVO_SEAL_HDR_LEN, out_priv, out_priv_len);
     memcpy(b + IVO_SEAL_HDR_LEN + out_priv_len, out_pub, out_pub_len);
+    ivo_wipe(policy, sizeof(policy));
 
     *blob_out_len = total;
     return 0;

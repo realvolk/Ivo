@@ -134,7 +134,7 @@ int con_read_secret(const char *label, char *out, size_t max_len, char echo)
 
     size_t idx = 0;
     for (;;) {
-        char c = hal_getchar();
+        char c = hal_getchar_timeout(10);
         if (c == 0) continue;
         if (c == '\r' || c == '\n') {
             out[idx] = '\0';
@@ -151,9 +151,12 @@ int con_read_secret(const char *label, char *out, size_t max_len, char echo)
             return -1;
         }
         if (c < 0x20 || c > 0x7E) continue;
-        if (idx + 1 < max_len) {
-            out[idx++] = c;
-            con_putc(echo);
+        if (idx + 1 >= max_len) {
+            ivo_wipe(out, max_len);
+            con_puts("\nInput too long.\n");
+            return -1;
         }
+        out[idx++] = c;
+        con_putc(echo);
     }
 }

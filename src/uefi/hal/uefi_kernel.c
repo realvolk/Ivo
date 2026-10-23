@@ -143,12 +143,14 @@ void hal_boot_uefi(const void *kernel, size_t kernel_size,
 
     if (cmdline && *cmdline) {
         CHAR16 *w = alloc_cmdline_utf16(cmdline);
-        if (w) {
-            size_t len = 0;
-            while (cmdline[len]) len++;
-            li.LoadOptions     = w;
-            li.LoadOptionsSize = (uint32_t)((len + 1) * 2);
+        if (!w) {
+            puts_("kernel cmdline alloc failed\n");
+            for (;;) __asm__ volatile("hlt");
         }
+        size_t len = 0;
+        while (cmdline[len]) len++;
+        li.LoadOptions     = w;
+        li.LoadOptionsSize = (uint32_t)((len + 1) * 2);
     }
 
     void *bs = g_st->BootServices;

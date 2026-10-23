@@ -99,7 +99,12 @@ int tpm_seal_try_unlock(boot_context_t *ctx)
     char pin[PIN_BUF];
     int  pin_len = 0;
     int  rc = -1;
-    if (blob[5] & IVO_SEAL_FLAG_PIN)
+    int  needs_pin = (blob[5] & IVO_SEAL_FLAG_PIN) != 0;
+    if (needs_pin && (blob[6] || blob[7] || blob[8])) {
+        mm_free(blob);
+        return -1;
+    }
+    if (needs_pin)
         pin_len = luks_read_passphrase("TPM PIN", pin, sizeof(pin));
 
     if (pin_len >= 0) {
@@ -122,6 +127,7 @@ int tpm_seal_request_pending(void)
 
 int tpm_seal_write_blob(const uint8_t *blob, size_t len)
 {
+    if (!blob || len == 0 || len > SEAL_MAX) return -1;
     fs_driver_t *saved;
     size_t sz = 0;
     int rc = -1;

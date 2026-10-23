@@ -50,14 +50,10 @@ int iso9660_get_boot_image(uint32_t catalog_lba,
                            uint32_t *image_lba,
                            uint32_t *image_sectors,
                            uint8_t  *platform_out);
-int iso9660_read_label(block_device_t *dev, char *out, size_t out_size);
 
-void fs_register(fs_driver_t *drv);
 int  fs_probe_mount(block_device_t *dev);
 int  fs_mount_as(fs_driver_t *drv, block_device_t *dev);
-int  fs_mount(block_device_t *dev);
 int  fs_read(const char *path, uint8_t *buf, size_t *len);
-int  fs_readlink(const char *path, char *buf, size_t len);
 int  fs_stat(const char *path, size_t *size);
 int  fs_opendir(const char *path, void **handle);
 int  fs_readdir(void *handle, char *name, size_t name_len);

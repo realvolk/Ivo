@@ -48,6 +48,7 @@ void ivo_main(boot_context_t *ctx)
      * when available; the UEFI variable Ivo/FirmwareVer is the
      * fallback. A corrupt store is left alone; the next boot retries.
      * Requires SB for security value. */
+    int uv_prior = -1;
     {
         int nv_ok = 0;
         int nv_v  = -1;
@@ -72,6 +73,7 @@ void ivo_main(boot_context_t *ctx)
             ivo_fwver_set(IVO_RELEASE);
         } else {
             int uv = ivo_fwver_get();
+            uv_prior = uv;
             if (uv == -2) {
                 hal_puts_serial("ivo: FirmwareVer corrupt; not overwritten\n");
             } else if (uv < 0) {
@@ -166,9 +168,13 @@ void ivo_main(boot_context_t *ctx)
         int cv = config_get_version();
         if (cv >= 0) {
             int stored = ivo_configver_get();
+            if (stored == -2)
+                panic("config version store corrupt");
+            if (stored < 0 && uv_prior >= 0)
+                panic("config version store missing after prior boot");
             if (stored >= 0 && cv < stored)
                 panic("config.toml version is older than the last accepted one");
-            if (cv > stored)
+            if (cv > stored || stored < 0)
                 ivo_configver_set(cv);
         }
     }

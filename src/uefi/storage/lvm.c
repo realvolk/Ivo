@@ -78,6 +78,7 @@ static int lvm_raw_read(uint64_t pv_lba, uint32_t count, uint8_t *buf)
 {
     if (luks_active())
         return luks_read_blocks(pv_lba, count, buf);
+    if (g_pv_base_lba + pv_lba < g_pv_base_lba) return -1;
     return hal_read_blocks(g_pv_base_lba + pv_lba, count, buf);
 }
 
@@ -228,7 +229,7 @@ static int read_quoted(lvm_cursor_t *c, char *out, size_t cap)
     c->p++;
     size_t n = 0;
     while (c->p < c->end && *c->p != '"') {
-        if (*c->p == '\\' && c->p + 1 < c->end) c->p++;
+        if (*c->p == '\\') return -1;
         char ch = *c->p++;
         if (n + 1 < cap) out[n++] = ch;
     }
@@ -620,7 +621,7 @@ int lvm_read_blocks(uint64_t lba, uint32_t count, uint8_t *buf)
         if (lv_to_pv_sector(lba + i, &pv_start) != 0) return -1;
         uint32_t cap = 8192;
         uint32_t j = 1;
-        while (i + j < count && j < cap) {
+        while (j < cap && j < count - i) {
             uint64_t next_pv;
             if (lv_to_pv_sector(lba + i + j, &next_pv) != 0) break;
             if (next_pv != pv_start + j) break;

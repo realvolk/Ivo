@@ -128,7 +128,13 @@ static void cmdline_editor(entry_t *e)
     size_t len = 0;
     if (e->cmdline) {
         size_t n = strlen(e->cmdline);
-        if (n >= sizeof(buf)) n = sizeof(buf) - 1;
+        if (n >= sizeof(buf)) {
+            con_puts("\n\ncmdline too long to edit; not changed.\n");
+            con_puts("Press any key.\n");
+            while (hal_getchar_timeout(10) == 0) { }
+            con_clear();
+            return;
+        }
         memcpy(buf, e->cmdline, n);
         len = n;
     }
@@ -139,7 +145,7 @@ static void cmdline_editor(entry_t *e)
     con_puts("\n\nEnter: save   Esc: cancel\n");
 
     for (;;) {
-        char c = hal_getchar();
+        char c = hal_getchar_timeout(10);
         if (c == 0) continue;
 
         if (c == '\r' || c == '\n') {
@@ -205,7 +211,7 @@ static entry_t *menu_select_text(boot_context_t *ctx, entry_t *entries)
     }
     con_puts("\n");
 
-    int timeout = 0;
+    int timeout = entry_timeout(&entries[visible_idx[selected]]);
     if (timeout > 0) {
         char prompt[32] = "Choose [default, ";
         int n = timeout;
@@ -238,7 +244,7 @@ static entry_t *menu_select_text(boot_context_t *ctx, entry_t *entries)
             elapsed_ms += wait;
             if (timeout > 0 && elapsed_ms >= timeout_ms) {
                 con_puts("\n");
-                return def ? def : &entries[visible_idx[0]];
+                return &entries[visible_idx[selected]];
             }
             continue;
         }
@@ -250,9 +256,10 @@ static entry_t *menu_select_text(boot_context_t *ctx, entry_t *entries)
             ivo_lastentry_set(chosen->name);
             return chosen;
         }
-        if (c == 'e') {
-            /* Cmdline editor is not available in text mode. */
-            continue;
+        if (c == 0x1B) {
+            shell_enter(ctx);
+            con_clear();
+            return menu_select_text(ctx, entries);
         }
         if (c >= '1' && c <= '9') {
             int idx = c - '1';
@@ -270,6 +277,7 @@ entry_t *menu_select(boot_context_t *ctx)
     int count = 0;
     entry_t *entries = config_get_entries(&count);
     if (count == 0) return 0;
+    config_clear_proven();
     build_visible(entries, count);
     if (visible_count == 0) return 0;
 
@@ -318,7 +326,7 @@ entry_t *menu_select(boot_context_t *ctx)
                     draw_footer(timeout, remaining);
                 }
                 if (elapsed_ms >= timeout_ms)
-                    return def ? def : &entries[visible_idx[0]];
+                    return &entries[visible_idx[selected]];
             }
             continue;
         }

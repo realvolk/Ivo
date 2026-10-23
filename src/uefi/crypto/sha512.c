@@ -10,6 +10,7 @@
  */
 
 #include "sha512.h"
+#include "../security/wipe.h"
 #include <string.h>
 
 static const uint64_t K[80] = {
@@ -106,6 +107,7 @@ static void sha512_compress(uint64_t h[8], const uint8_t block[128])
 
 void sha512_init(sha512_ctx_t *ctx)
 {
+    if (!ctx) return;
     for (int i = 0; i < 8; i++) ctx->h[i] = H0[i];
     ctx->len_lo   = 0;
     ctx->len_hi   = 0;
@@ -114,6 +116,7 @@ void sha512_init(sha512_ctx_t *ctx)
 
 void sha512_update(sha512_ctx_t *ctx, const void *data, size_t len)
 {
+    if (!ctx || (!data && len)) return;
     const uint8_t *p = (const uint8_t *)data;
 
     while (len > 0) {
@@ -140,6 +143,7 @@ void sha512_update(sha512_ctx_t *ctx, const void *data, size_t len)
 
 void sha512_final(sha512_ctx_t *ctx, uint8_t out[64])
 {
+    if (!ctx || !out) return;
     /* Snapshot length in bits before the padding bytes are written. */
     uint64_t bit_lo = ctx->len_lo << 3;
     uint64_t bit_hi = (ctx->len_hi << 3) | (ctx->len_lo >> 61);
@@ -175,4 +179,5 @@ void sha512_final(sha512_ctx_t *ctx, uint8_t out[64])
         out[i*8 + 6] = (uint8_t)(ctx->h[i] >>  8);
         out[i*8 + 7] = (uint8_t)(ctx->h[i]);
     }
+    ivo_wipe(ctx, sizeof(*ctx));
 }

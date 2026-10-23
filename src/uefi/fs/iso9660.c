@@ -23,14 +23,7 @@
 #define SUSP_NM_CURRENT     0x02
 #define SUSP_NM_PARENT      0x04
 
-#ifndef CONFIG_HOST
-extern int luks_read_blocks(uint64_t lba, uint32_t count, uint8_t *buf);
-extern int luks_active(void);
-#ifdef LVM
-extern int lvm_read_blocks(uint64_t lba, uint32_t count, uint8_t *buf);
-extern int lvm_active(void);
-#endif
-#else
+#ifdef CONFIG_HOST
 void *mm_alloc(size_t n);
 void  mm_free(void *p);
 void  con_puts(const char *s);
@@ -58,6 +51,7 @@ static int iso_read_logical_sector(uint64_t sector, void *buf)
         memcpy(buf, iso.memory + offset, ISO_SECTOR_SIZE);
         return 0;
     }
+    if (!iso.dev) return -1;
 
     uint64_t hal_lba   = sector * (ISO_SECTOR_SIZE / 512);
     uint32_t hal_count = ISO_SECTOR_SIZE / 512;
@@ -67,12 +61,7 @@ static int iso_read_logical_sector(uint64_t sector, void *buf)
     (void)hal_lba; (void)hal_count;
     return -1;
 #else
-#ifdef LVM
-    if (lvm_active())
-        return lvm_read_blocks(hal_lba, hal_count, buf);
-#endif
-    if (luks_active())
-        return luks_read_blocks(hal_lba, hal_count, buf);
+    if (iso.dev->lba_start + hal_lba < iso.dev->lba_start) return -1;
     return hal_read_blocks(iso.dev->lba_start + hal_lba, hal_count, buf);
 #endif
 }
@@ -286,10 +275,13 @@ int iso9660_probe(block_device_t *dev)
 
 int iso9660_mount(block_device_t *dev)
 {
-    iso.dev        = dev;
-    iso.memory     = NULL;
+    if (!dev) return -1;
+    iso.dev         = dev;
+    iso.memory      = NULL;
     iso.memory_size = 0;
-    return iso_scan_descriptors();
+    int rc = iso_scan_descriptors();
+    if (rc != 0) iso.dev = NULL;
+    return rc;
 }
 
 int iso9660_mount_memory(const void *data, size_t size)
@@ -299,7 +291,12 @@ int iso9660_mount_memory(const void *data, size_t size)
     iso.dev         = NULL;
     iso.memory      = (const uint8_t *)data;
     iso.memory_size = size;
-    return iso_scan_descriptors();
+    int rc = iso_scan_descriptors();
+    if (rc != 0) {
+        iso.memory      = NULL;
+        iso.memory_size = 0;
+    }
+    return rc;
 }
 
 void iso9660_umount(void)

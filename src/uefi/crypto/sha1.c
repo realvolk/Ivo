@@ -1,13 +1,8 @@
 #include "sha1.h"
+#include "../security/wipe.h"
 #include <string.h>
 
 #define ROTL(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
-
-static void sha1_zeroize(void *v, size_t n)
-{
-    volatile uint8_t *p = v;
-    while (n--) *p++ = 0;
-}
 
 static void sha1_process_block(uint32_t state[5], const uint8_t block[64])
 {
@@ -42,6 +37,7 @@ static void sha1_process_block(uint32_t state[5], const uint8_t block[64])
 
 void sha1_init(struct sha1_ctx *ctx)
 {
+    if (!ctx) return;
     ctx->state[0] = 0x67452301;
     ctx->state[1] = 0xEFCDAB89;
     ctx->state[2] = 0x98BADCFE;
@@ -53,6 +49,7 @@ void sha1_init(struct sha1_ctx *ctx)
 
 void sha1_update(struct sha1_ctx *ctx, const uint8_t *data, size_t len)
 {
+    if (!ctx || (!data && len)) return;
     ctx->bitlen += (uint64_t)len * 8;
 
     if (ctx->buflen > 0) {
@@ -82,6 +79,7 @@ void sha1_update(struct sha1_ctx *ctx, const uint8_t *data, size_t len)
 
 void sha1_final(struct sha1_ctx *ctx, uint8_t out[SHA1_DIGEST_SIZE])
 {
+    if (!ctx || !out) return;
     uint64_t bitlen = ctx->bitlen;
 
     uint8_t pad = 0x80;
@@ -103,11 +101,12 @@ void sha1_final(struct sha1_ctx *ctx, uint8_t out[SHA1_DIGEST_SIZE])
         out[i * 4 + 3] = (uint8_t)(ctx->state[i]);
     }
 
-    sha1_zeroize(ctx, sizeof(*ctx));
+    ivo_wipe(ctx, sizeof(*ctx));
 }
 
 void sha1(const uint8_t *msg, size_t len, uint8_t out[SHA1_DIGEST_SIZE])
 {
+    if (!out) return;
     struct sha1_ctx ctx;
     sha1_init(&ctx);
     sha1_update(&ctx, msg, len);

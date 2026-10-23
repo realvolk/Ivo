@@ -169,6 +169,7 @@ static void inv_mix_columns(uint8_t state[16]) {
 }
 
 int aes_init(struct aes_ctx *ctx, const uint8_t *key, size_t key_len) {
+    if (!ctx || !key) return -1;
     int nk, nr;
 
     gmul_tables_init();
@@ -177,6 +178,7 @@ int aes_init(struct aes_ctx *ctx, const uint8_t *key, size_t key_len) {
         case AES128_KEY_SIZE: nk = 4; nr = 10; break;
         case AES256_KEY_SIZE: nk = 8; nr = 14; break;
         default:
+            if (ctx) ivo_wipe(ctx, sizeof(*ctx));
             return -1;
     }
 
@@ -205,6 +207,7 @@ int aes_init(struct aes_ctx *ctx, const uint8_t *key, size_t key_len) {
 void aes_encrypt_block(const struct aes_ctx *ctx,
                        const uint8_t in[AES_BLOCK_SIZE],
                        uint8_t out[AES_BLOCK_SIZE]) {
+    if (!ctx || !in || !out) return;
     uint8_t state[16];
     int round;
 
@@ -228,6 +231,7 @@ void aes_encrypt_block(const struct aes_ctx *ctx,
 void aes_decrypt_block(const struct aes_ctx *ctx,
                        const uint8_t in[AES_BLOCK_SIZE],
                        uint8_t out[AES_BLOCK_SIZE]) {
+    if (!ctx || !in || !out) return;
     uint8_t state[16];
     int round;
 

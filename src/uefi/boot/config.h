@@ -42,6 +42,7 @@ int      config_error_line(void);
 /* 1 if every file the entry boots has a hash, 0 otherwise. */
 int      config_entry_hashes_complete(const entry_t *e);
 entry_t *config_get_entries(int *count);
+void     config_clear_proven(void);
 entry_t *config_get_default(void);
 int      config_get_timeout(void);
 

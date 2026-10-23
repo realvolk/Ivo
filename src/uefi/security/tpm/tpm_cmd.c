@@ -172,7 +172,6 @@ int tpm_transact(struct tpm_wr *w, uint8_t *rsp, size_t rsp_cap,
     uint32_t size = ((uint32_t)rsp[2] << 24) | ((uint32_t)rsp[3] << 16) |
                     ((uint32_t)rsp[4] << 8)  |  (uint32_t)rsp[5];
     if (size < TPM_HDR_LEN || size > rsp_cap) {
-        con_puts("tpm: bad response size\n");
         hal_puts_serial("tpm: bad response size\n");
         return -1;
     }
@@ -211,7 +210,7 @@ int tpm_start_session(uint8_t type, uint32_t *session_out)
     if (tpm_transact(&w, rsp, sizeof(rsp), &r, "startauth") != 0)
         return -1;
     uint32_t h = tr_u32(&r);
-    if (r.err) return -1;
+    if (r.err || h == 0) return -1;
     *session_out = h;
     return 0;
 }
@@ -276,8 +275,9 @@ static int cmd_load(uint32_t parent,
     tw_b2b(&w, pub, pub_len);
 
     if (tpm_transact(&w, rsp, sizeof(rsp), &r, "load") == 0) {
+        tr_params(&r);
         uint32_t h = tr_u32(&r);
-        if (!r.err) { *object_out = h; rc = 0; }
+        if (!r.err && h != 0) { *object_out = h; rc = 0; }
     }
     ivo_wipe(cmd, sizeof(cmd));
     return rc;
