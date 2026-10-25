@@ -1,5 +1,22 @@
 # Ivo Bootloader Changelog
 
+## [v1.1.6]
+
+### Added
+
+- `shell.c`: `check` verifies kernel/initrd/chainload hashes against
+  the signed config without booting, reporting expected vs actual on
+  mismatch and flagging entries that would be refused under
+  `SECURE_BOOT=1`. `info` dumps bootloader state (filesystem, LUKS,
+  LVM, TPM, tier, disk). `ls -l` long listing.
+
+### Fixed
+
+- `shell.c`: `cmd_entries` sanitized via `put_safe`. `cmd_cat`
+  distinguishes directories from files. `cat_buf` and command buffer
+  wiped after use. `fs_access_granted` removed (redundant with
+  `core_unlocked_without_passphrase()`).
+
 ## [v1.1.5]
 
 ### Changed
