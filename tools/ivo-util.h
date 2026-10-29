@@ -47,4 +47,6 @@ const char *ivo_toml_kv(ivo_buf_t *b, const char *key, const char *value);
 int ivo_entry_name(const char *in, char *out, size_t out_size);
 int ivo_parse_uint(const char *s, unsigned long max, unsigned long *out);
 
+int ivo_read_efi_flags(const char *path, char *out, size_t out_size);
+int ivo_find_esp(char *out, size_t out_size);
 #endif

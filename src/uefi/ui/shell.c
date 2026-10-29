@@ -16,6 +16,8 @@ extern int tpm_available(void);
 
 static uint8_t cat_buf[SHELL_CAT_LIMIT];
 
+static int fs_access_allowed(boot_context_t *ctx);
+
 static const char *skip_spaces(const char *p)
 {
     while (*p == ' ') p++;

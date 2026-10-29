@@ -6,6 +6,14 @@
 #include "ui/gfx.h"
 #include "ui/text.h"
 #include "security/efivars.h"
+
+#ifndef IVO_BUILD_FLAGS
+#define IVO_BUILD_FLAGS ""
+#endif
+
+__attribute__((used))
+const char ivo_build_flags_marker[] = "IVO_FLAGS:" IVO_BUILD_FLAGS;
+
 extern int luks_enabled(boot_context_t *ctx);
 extern int luks_unlock(boot_context_t *ctx);
 #ifdef LVM
@@ -170,10 +178,12 @@ void ivo_main(boot_context_t *ctx)
             int stored = ivo_configver_get();
             if (stored == -2)
                 panic("config version store corrupt");
+#ifdef SECURE_BOOT
             if (stored < 0 && uv_prior >= 0)
                 panic("config version store missing after prior boot");
             if (stored >= 0 && cv < stored)
                 panic("config.toml version is older than the last accepted one");
+#endif
             if (cv > stored || stored < 0)
                 ivo_configver_set(cv);
         }

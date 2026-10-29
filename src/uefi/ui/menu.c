@@ -29,6 +29,13 @@ static void build_visible(entry_t *entries, int count)
     }
 }
 
+static uint32_t entry_accent(const entry_t *e)
+{
+    if (e->is_chainload) return theme_current.accent;
+    if (e->is_iso_boot)  return theme_current.warn_fg;
+    return 0;
+}
+
 static void draw_entry(int row, entry_t *e, int selected, int is_default)
 {
     char buf[128];
@@ -39,7 +46,7 @@ static void draw_entry(int row, entry_t *e, int selected, int is_default)
         for (; *s && i < 120; s++) buf[i++] = *s;
     }
     buf[i] = '\0';
-    frame_row_sel(row, buf, selected);
+    frame_row_sel(row, buf, selected, entry_accent(e));
 }
 
 static void draw_footer(int timeout, int remaining_s)
@@ -111,7 +118,66 @@ static void set_cmdline(entry_t *e, const char *s)
     e->cmdline = p;
 }
 
-static void cmdline_editor(entry_t *e)
+static void cmdline_editor_fb(entry_t *e)
+{
+    char buf[CMDLINE_EDIT_MAX];
+    size_t len = 0;
+    if (e->cmdline) {
+        size_t n = strlen(e->cmdline);
+        if (n >= sizeof(buf)) {
+            frame_content_clear();
+            frame_row(1, "cmdline too long to edit; not changed.",
+                      theme_current.error_fg);
+            frame_row(2, "Press any key to return.",
+                      theme_current.fg_dim);
+            while (hal_getchar_timeout(10) == 0) { }
+            return;
+        }
+        memcpy(buf, e->cmdline, n);
+        len = n;
+    }
+
+    char title[128];
+    int i = 0;
+    const char *pre = "Editing: ";
+    for (const char *p = pre; *p && i < 100; p++) title[i++] = *p;
+    for (const char *p = e->name; *p && i < 120; p++) title[i++] = *p;
+    title[i] = '\0';
+    frame_title(title);
+
+    while (1) {
+        frame_content_clear();
+        frame_row(0, "Enter: save    Esc: cancel", theme_current.fg_dim);
+
+        char line[CMDLINE_EDIT_MAX + 4];
+        int k = 0;
+        line[k++] = '>';
+        line[k++] = ' ';
+        for (size_t j = 0; j < len; j++) line[k++] = buf[j];
+        line[k++] = '_';
+        line[k] = '\0';
+        frame_row(2, line, theme_current.fg);
+
+        char c = hal_getchar_timeout(10);
+        if (c == 0) continue;
+
+        if (c == '\r' || c == '\n') {
+            buf[len] = '\0';
+            set_cmdline(e, buf);
+            return;
+        }
+        if (c == 0x1B) return;
+        if (c == '\b' || c == 0x7F) {
+            if (len > 0) len--;
+            continue;
+        }
+        if (c >= 0x20 && c <= 0x7E) {
+            if (len + 1 < sizeof(buf)) buf[len++] = c;
+        }
+    }
+}
+
+static void cmdline_editor_text(entry_t *e)
 {
     int lh = text_height();
     int P  = theme_current.padding;
@@ -172,6 +238,14 @@ static void cmdline_editor(entry_t *e)
         for (size_t i = 0; i < len; i++) con_putc(buf[i]);
         con_putc('_');
     }
+}
+
+static void cmdline_editor(entry_t *e)
+{
+    if (gfx_available() && !gfx_text_mode())
+        cmdline_editor_fb(e);
+    else
+        cmdline_editor_text(e);
 }
 
 static entry_t *menu_select_text(boot_context_t *ctx, entry_t *entries)
@@ -364,16 +438,10 @@ entry_t *menu_select(boot_context_t *ctx)
         }
 
         if (c == 'e') {
-            /* Refuse if the disk was unlocked from a TPM-sealed
-             * secret without the user proving the passphrase this
-             * boot. Otherwise a cmdline editor is a way to append
-             * init=/bin/bash and get root on the decrypted fs. */
             if (core_unlocked_without_passphrase()) {
                 continue;
             }
             entry_t *e = &entries[visible_idx[selected]];
-            /* Same reason for password-protected entries. Go fuck
-            yourself if you edit this. */
             if (entry_password_check(e) != 0) {
                 draw_menu(entries, selected, def, timeout, timeout);
                 continue;

@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -270,11 +271,24 @@ int ivo_open_beneath(const char *root, const char *subdir,
     const char *why = ivo_boot_path_problem(path);
     if (why) { snprintf(err, err_size, "%s", why); return -1; }
 
-    int fd = open(root && root[0] ? root : "/",
-                  O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    char root_buf[PATH_MAX];
+    const char *r = root && root[0] ? root : "/";
+    size_t rlen = strlen(r);
+    if (rlen >= sizeof(root_buf)) {
+        snprintf(err, err_size, "root path too long");
+        return -1;
+    }
+    memcpy(root_buf, r, rlen + 1);
+    while (rlen > 0 && root_buf[rlen - 1] == '/') root_buf[--rlen] = '\0';
+    if (rlen == 0) {
+        root_buf[0] = '/';
+        root_buf[1] = '\0';
+        rlen = 1;
+    }
+
+    int fd = open(root_buf, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) {
-        snprintf(err, err_size, "%s: %s", root && root[0] ? root : "/",
-                 strerror(errno));
+        snprintf(err, err_size, "%s: %s", root_buf, strerror(errno));
         return -1;
     }
     if (subdir && subdir[0]) {
@@ -428,4 +442,89 @@ int ivo_parse_uint(const char *s, unsigned long max, unsigned long *out)
     }
     *out = v;
     return 0;
+}
+
+int ivo_read_efi_flags(const char *path, char *out, size_t out_size)
+{
+    if (!path || !out || out_size < 2) return -1;
+
+    uint8_t *buf = NULL;
+    size_t len = 0;
+    if (ivo_read_file(path, 64u << 20, &buf, &len) != 0) return -1;
+
+    static const char marker[] = "IVO_FLAGS:";
+    const size_t marker_len = sizeof(marker) - 1;
+
+    int rc = -1;
+    if (len < marker_len) goto out;
+
+    for (size_t i = 0; i + marker_len <= len; i++) {
+        if (memcmp(buf + i, marker, marker_len) != 0) continue;
+
+        const uint8_t *p = buf + i + marker_len;
+        size_t remaining = len - i - marker_len;
+        size_t n = 0;
+        while (n < remaining && p[n] != 0) {
+            if (n + 2 > out_size) goto out;
+            n++;
+        }
+        if (n >= remaining) goto out;
+
+        memcpy(out, p, n);
+        out[n] = '\0';
+        rc = 0;
+        goto out;
+    }
+
+out:
+    free(buf);
+    return rc;
+}
+
+static void unescape_mount_path(const char *in, char *out, size_t cap)
+{
+    size_t n = 0;
+    for (const char *p = in; *p && n + 1 < cap; p++) {
+        if (p[0] == '\\' && p[1] >= '0' && p[1] <= '7' &&
+            p[2] >= '0' && p[2] <= '7' && p[3] >= '0' && p[3] <= '7') {
+            out[n++] = (char)((p[1] - '0') * 64 + (p[2] - '0') * 8 + (p[3] - '0'));
+            p += 3;
+        } else {
+            out[n++] = *p;
+        }
+    }
+    out[n] = '\0';
+}
+
+int ivo_find_esp(char *out, size_t out_size)
+{
+    if (!out || out_size < 2) return -1;
+
+    FILE *f = fopen("/proc/self/mounts", "re");
+    if (!f) return -1;
+
+    char line[4096];
+    int rc = -1;
+    while (fgets(line, sizeof(line), f)) {
+        char dev[PATH_MAX], raw_mnt[PATH_MAX], fstype[64];
+        if (sscanf(line, "%4095s %4095s %63s", dev, raw_mnt, fstype) != 3)
+            continue;
+        if (strcmp(fstype, "vfat") != 0) continue;
+
+        char mnt[PATH_MAX];
+        unescape_mount_path(raw_mnt, mnt, sizeof(mnt));
+
+        char efi_dir[PATH_MAX];
+        int n = snprintf(efi_dir, sizeof(efi_dir), "%s/EFI", mnt);
+        if (n < 0 || (size_t)n >= sizeof(efi_dir)) continue;
+
+        struct stat st;
+        if (stat(efi_dir, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+
+        snprintf(out, out_size, "%s", mnt);
+        rc = 0;
+        break;
+    }
+    fclose(f);
+    return rc;
 }

@@ -106,7 +106,7 @@ void frame_row_clear_right(int row, int width)
                   theme_current.row_height, theme_current.panel_bg);
 }
 
-void frame_row_sel(int row, const char *s, int selected)
+void frame_row_sel(int row, const char *s, int selected, uint32_t accent_color)
 {
     int lh   = text_height();
     int y    = g_content_y + row * theme_current.row_height;
@@ -117,6 +117,8 @@ void frame_row_sel(int row, const char *s, int selected)
         gfx_rounded_rect_erase_gaps(g_content_x, ybox - 2, g_content_w,
                                     lh + 4, 6, theme_current.panel_bg);
     }
+    if (accent_color)
+        gfx_fill_rect(g_content_x + 3, ybox - 1, 3, lh + 2, accent_color);
     uint32_t col = selected ? theme_current.sel_fg : theme_current.fg;
     text_draw((g_content_x + 14) << 2, ybox, s, col);
 }

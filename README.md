@@ -44,18 +44,28 @@ Unsigned distribution kernels boot under Secure Boot.
 - TPM 2.0 measurement (PCRs 4, 8, 9)
 - TPM-sealed LUKS unlock, optional PIN
 - Chainload with hash verification
-- Read-only recovery shell
+- Read-only recovery shell with hash verification and diagnostics
 - Compile-time theme and keymap selection
 - Single Makefile
 
 ## Tools
 
-- **`ivo-install`** — install to an ESP or USB stick
-- **`ivo-config`** — scan `/boot`, write `config.toml`
-- **`ivo-sign`** — hash, check, sign, verify a config
-- **`ivo-keygen`** — Ed25519 keypair; `--password-hash`
-- **`ivo-convert`** — GRUB, Limine, rEFInd → `config.toml`
-- **`ivo-doctor`** — read-only diagnostic
+Two binaries, `tools/ivo` and `tools/ivo-build`.
+
+- **`ivo status`** — read-only diagnostic. Reports ESP, `ivo.efi`
+  flags, config version and signature state, TPM seal.
+- **`ivo config generate`** — scan a boot filesystem, write
+  `config.toml`.
+- **`ivo config hash` / `check`** — compute and verify
+  `kver`/`iver`/`cver`.
+- **`ivo config sign` / `verify`** — Ed25519 over `config.toml`.
+- **`ivo config convert`** — GRUB, Limine, rEFInd → `config.toml`.
+- **`ivo key gen` / `password-hash`** — Ed25519 keypair, per-entry
+  password hash.
+- **`ivo install uefi`** — install to an ESP.
+- **`ivo install usb`** — build a bootable USB stick from an ISO.
+- **`ivo-build font`** — regenerate `font_data.h` from a TTF.
+- **`ivo-build mkinitivo`** — embed a config at build time.
 
 `contrib/initcpio/`: mkinitcpio post hook. Re-hashes the config after
 kernel or initramfs rebuild.
@@ -86,43 +96,54 @@ make tests
 ### Install
 
 ```sh
+sudo make tools
 sudo make install ESP=/boot/efi
 ```
 
-Writes `<esp>/EFI/BOOT/BOOTX64.EFI`. Doesn't touch NVRAM.
-`sudo make uninstall ESP=/boot/efi` removes it.
+Installs `ivo.efi` to `<esp>/EFI/ivo/ivo.efi` and adds an NVRAM boot
+entry. `EFI/BOOT/BOOTX64.EFI` is not touched. `--replace-boot` (via
+`ivo install uefi`) is the explicit opt-in for overwriting it, with
+automatic `.bak` backup of the original.
 
-Or `tools/ivo-install --target uefi --esp /boot/efi`.
+`sudo make uninstall ESP=/boot/efi` removes `EFI/ivo/ivo.efi`. The
+NVRAM entry is left in place; remove via firmware setup or
+`efibootmgr -b XXXX -B`.
 
-Generate config, hash, optionally sign:
+Generate config, hash, sign:
 
 ```sh
-tools/ivo-config -o config.toml
-tools/ivo-keygen --out-prefix /path/to/key
+sudo tools/ivo config generate --boot /boot -o config.toml
+sudo tools/ivo key gen --out-prefix /path/to/key
 cp /path/to/key.h src/uefi/security/secure_boot_pubkey.h
 # rebuild ivo.efi
-tools/ivo-sign --hash --config config.toml --root /boot
-tools/ivo-sign --sign --config config.toml --key /path/to/key.sec
+sudo tools/ivo config hash --config config.toml
+sudo tools/ivo config sign --config config.toml --key /path/to/key.sec
 sudo cp config.toml config.toml.sig /boot/efi/ivo/
 
 sudo sbctl sign -s ivo.efi    # if SECURE_BOOT=1
 ```
 
-`--root`: boot filesystem mount point. Symlinks and `..` refused.
-`subvol` resolves beneath `--subvol-root`. `iso-boot` needs
-`--iso IMAGE`, matched by volume label. `--hash` rewrites
-atomically, no-op if every hash matches. `--sign` refuses a config
-the bootloader would reject.
+`ivo config hash` defaults `--root` to `/`; pass `--root` explicitly
+when hashing a different filesystem (chroot, mounted image).
+Symlinks and `..` refused. `subvol` entries resolve beneath
+`--subvol-root`. `iso-boot` entries need `--iso IMAGE`, matched by
+volume label. `--hash` rewrites atomically, no-op if every hash
+matches. `--sign` refuses a config the bootloader would reject.
 
-`ivo-keygen` writes `key.sec` (0600, `seed[32] || pk[32]`),
+`ivo key gen` writes `key.sec` (0600, `seed[32] || pk[32]`),
 `key.pub`, `key.h`. Refuses overwrite without `--force`.
 
-`ivo-doctor --pub key.pub` verifies the signature.
+`ivo config verify --pub key.pub` verifies the signature.
+
+`ivo status` reports the state of the installed bootloader:
+`ivo.efi` flags, config presence and version, signature, TPM seal.
+Exit 0 = consistent, 1 = inconsistent (see warnings), 2 = cannot
+determine (no ESP, no `ivo.efi`).
 
 ### Install (USB)
 
 ```sh
-sudo tools/ivo-install --target usb --device /dev/sdX --iso alpine.iso
+sudo tools/ivo install usb --device /dev/sdX --iso alpine.iso
 ```
 
 Partitions the device, formats the ESP, extracts kernel and initrd
@@ -133,10 +154,10 @@ CSM off.
 ### Convert an existing config
 
 ```sh
-tools/ivo-convert --from grub   /boot/grub/grub.cfg -o config.toml
-tools/ivo-convert --from limine /boot/limine.cfg     -o config.toml
-tools/ivo-convert --from refind /boot/refind.conf    -o config.toml
-tools/ivo-sign --hash --config config.toml --root /boot
+sudo tools/ivo config convert --from grub   /boot/grub/grub.cfg -o config.toml
+sudo tools/ivo config convert --from limine /boot/limine.cfg     -o config.toml
+sudo tools/ivo config convert --from refind /boot/refind.conf    -o config.toml
+sudo tools/ivo config hash --config config.toml
 ```
 
 ## Configuration
@@ -151,13 +172,13 @@ kernel = "/boot/vmlinuz-linux"
 initrd = "/boot/initramfs-linux.img"
 options = "root=/dev/mapper/vg0-root rw"
 subvol = "@"
-kver = "<filled by ivo-sign --hash>"
-iver = "<filled by ivo-sign --hash>"
+kver = "<filled by ivo config hash>"
+iver = "<filled by ivo config hash>"
 
 [entries.Windows]
 type = "efi-chainload"
 path = "/EFI/Microsoft/Boot/bootmgfw.efi"
-cver = "<filled by ivo-sign --hash>"
+cver = "<filled by ivo config hash>"
 ```
 
 Strict TOML subset: global keys, then `[entries.<name>]` sections. No
@@ -196,8 +217,9 @@ Two mitigations:
 2. **mkinitcpio post hook.** Install
    `contrib/initcpio/ivo-sign.hook` to `/etc/initcpio/post/ivo`,
    configure `/etc/ivo/sign.conf`. Every initramfs rebuild runs
-   `ivo-sign --hash` (and `--sign` if a key is set). Failure prints
-   a boxed error and exits non-zero, so pacman shows the hook failed.
+   `ivo config hash` (and `config sign` if a key is set). Failure
+   prints a boxed error and exits non-zero, so pacman shows the hook
+   failed.
 
    ```sh
    sudo install -Dm644 contrib/initcpio/sign.conf /etc/ivo/sign.conf
@@ -214,6 +236,8 @@ Always:
 - `nasm`
 - `binutils` (`ld`, `objcopy`)
 - `x86_64-w64-mingw32-gcc`
+- A C compiler for the host tools (`cc`)
+- `libm` (for `ivo-build`, from `stb_truetype`)
 
 By feature:
 

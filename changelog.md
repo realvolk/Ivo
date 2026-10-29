@@ -1,5 +1,39 @@
 # Ivo Bootloader Changelog
 
+## [v1.1.7] — 2026-10-29
+
+### Added
+
+- `main.c`: `ivo.efi` embeds an `IVO_FLAGS:` marker with the
+  compile-time feature set.
+- `tools/ivo`: user-facing tool. `status`, `key gen`,
+  `key password-hash`, `config generate|hash|check|sign|verify|
+  convert`, `install uefi|usb`.
+- `tools/ivo-build`: build-time tool. `font`, `mkinitivo`.
+- `ivo status`: read-only diagnostic.
+
+### Changed
+
+- Tools consolidated from 10 binaries to 2. `ivo-config`,
+  `ivo-convert`, `ivo-doctor`, `ivo-install`, `ivo-keygen`,
+  `ivo-sign`, `ivo-status`, `font_rasterize`, `mkinitivo`,
+  `keymap_compiler` removed.
+- `ivo install uefi` writes `EFI/ivo/ivo.efi` and adds an NVRAM
+  entry; no longer overwrites `EFI/BOOT/BOOTX64.EFI`. `--replace-boot`
+  opts into the old behavior with automatic `.bak` backup.
+- `make install` delegates to `ivo install uefi`.
+- `ivo config hash` / `config check` default `--root` to `/`.
+  `ivo config generate` auto-detects mount point vs directory.
+
+### Fixed
+
+- `text.c`: `text_draw` wrote glyphs into a fixed 256-byte scratch
+  buffer sized for the smallest font. Wider glyphs read past it
+  (OOB into `.bss`) or were skipped. Scratch buffer removed.
+- `gfx.c`: `gfx_init` didn't reject a non-multiple-of-4 pitch;
+  `pitch / 4` as pixel stride would misalign rows after the first.
+  Guarded.
+
 ## [v1.1.6]
 
 ### Added

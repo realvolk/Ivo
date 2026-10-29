@@ -31,11 +31,21 @@ TOOLS_DIR = tools
 TESTS_DIR = tests
 ESP       ?=
 
-TOOLS_BIN = $(TOOLS_DIR)/mkinitivo $(TOOLS_DIR)/keymap_compiler \
-            $(TOOLS_DIR)/ivo-sign $(TOOLS_DIR)/ivo-keygen \
-            $(TOOLS_DIR)/ivo-convert $(TOOLS_DIR)/ivo-install \
-            $(TOOLS_DIR)/ivo-config $(TOOLS_DIR)/ivo-doctor \
-            $(TOOLS_DIR)/font_rasterize
+TOOLS_BIN = $(TOOLS_DIR)/ivo $(TOOLS_DIR)/ivo-build
+
+IVO_HOST_CRYPTO = src/uefi/crypto/ed25519_verify.c \
+                  src/uefi/crypto/ed25519_sign.c \
+                  src/uefi/crypto/ed25519_keypair.c \
+                  src/uefi/crypto/ed25519_seed.c \
+                  src/uefi/crypto/fe.c \
+                  src/uefi/crypto/ge.c \
+                  src/uefi/crypto/sc.c \
+                  src/uefi/crypto/sha512.c \
+                  src/uefi/crypto/sha256.c \
+                  src/uefi/crypto/sha1.c \
+                  src/uefi/crypto/hmac.c \
+                  src/uefi/crypto/hmac_sha1.c \
+                  src/uefi/crypto/pbkdf2.c
 TESTS_BIN = $(TESTS_DIR)/sha512-test $(TESTS_DIR)/ed25519-test \
             $(TESTS_DIR)/luks1-test $(TESTS_DIR)/luks2-test \
             $(TESTS_DIR)/btrfs-test
@@ -51,8 +61,11 @@ CFLAGS_EFI = -Wall -Wextra -std=c11 -O2 -ffreestanding -fno-builtin \
              -DIVO_THEME_$(shell echo $(THEME) | tr a-z A-Z) \
              -DIVO_GFX_FMT_$(shell echo $(GFX_FMT) | tr a-z A-Z)
 
+IVO_BUILD_FLAGS_STR =
+
 ifeq ($(LUKS),1)
     CFLAGS_EFI += -DLUKS
+    IVO_BUILD_FLAGS_STR += LUKS
     ifeq ($(LUKS_USE_ARGON2),1)
         CFLAGS_EFI += -DLUKS_USE_ARGON2
     endif
@@ -60,15 +73,20 @@ endif
 
 ifeq ($(LVM),1)
     CFLAGS_EFI += -DLVM
+    IVO_BUILD_FLAGS_STR += LVM
 endif
 
 ifeq ($(SECURE_BOOT),1)
     CFLAGS_EFI += -DSECURE_BOOT
+    IVO_BUILD_FLAGS_STR += SECURE_BOOT
 endif
 
 ifeq ($(TPM),1)
     CFLAGS_EFI += -DTPM
+    IVO_BUILD_FLAGS_STR += TPM
 endif
+
+CFLAGS_EFI += -DIVO_BUILD_FLAGS='"$(strip $(IVO_BUILD_FLAGS_STR))"'
 
 STAGE2_C_SRC  = $(wildcard src/uefi/*.c) \
                 $(wildcard src/uefi/boot/*.c) \
@@ -108,54 +126,25 @@ TOOL_CONFIG = src/uefi/boot/config.c src/uefi/boot/config.h
 TOOL_ED25519 = src/uefi/crypto/ed25519.h src/uefi/crypto/fe.c \
                src/uefi/crypto/ge.c src/uefi/crypto/sc.c
 
-$(TOOLS_DIR)/mkinitivo: $(TOOLS_DIR)/mkinitivo.c $(TOOL_CONFIG) $(TOOL_UTIL)
+$(TOOLS_DIR)/ivo: $(TOOLS_DIR)/ivo.c \
+                  $(TOOLS_DIR)/ivo-util.c \
+                  $(TOOLS_DIR)/ivo-util.h \
+                  $(TOOLS_DIR)/ivo-sign-host.c \
+                  $(TOOL_CONFIG) \
+                  src/uefi/security/password.c \
+                  src/uefi/fs/iso9660.c \
+                  $(IVO_HOST_CRYPTO)
 	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
 
-$(TOOLS_DIR)/keymap_compiler: $(TOOLS_DIR)/keymap_compiler.c
-	$(HOST_CC) -O2 -Wall -Wextra -o $@ $<
-
-$(TOOLS_DIR)/font_rasterize: $(TOOLS_DIR)/font_rasterize.c \
-                             $(TOOLS_DIR)/third_party/stb_truetype.h
-	$(HOST_CC) -O2 -Wall -Wextra -I$(TOOLS_DIR) -o $@ $(TOOLS_DIR)/font_rasterize.c -lm
-
-src/uefi/ui/font_data.h: $(TOOLS_DIR)/font_rasterize assets/NotoSansMono-Regular.ttf
-	$(TOOLS_DIR)/font_rasterize assets/NotoSansMono-Regular.ttf 24 19 $@
-
-$(TOOLS_DIR)/ivo-sign: $(TOOLS_DIR)/ivo-sign.c \
-                         $(TOOLS_DIR)/ivo-sign-host.c \
-                         src/uefi/crypto/ed25519_sign.c \
-                         src/uefi/crypto/ed25519_keypair.c \
-                         src/uefi/crypto/ed25519_verify.c \
-                         $(TOOL_ED25519) $(TOOL_CONFIG) $(TOOL_UTIL) \
-                         src/uefi/fs/iso9660.c
-	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
-
-$(TOOLS_DIR)/ivo-keygen: $(TOOLS_DIR)/ivo-keygen.c \
-                           src/uefi/crypto/ed25519_keypair.c \
-                           src/uefi/crypto/ed25519_seed.c \
-                           src/uefi/crypto/ed25519_sign.c \
-                           src/uefi/crypto/ed25519_verify.c \
-                           src/uefi/crypto/pbkdf2.c \
-                           src/uefi/crypto/hmac.c \
-                           src/uefi/crypto/hmac_sha1.c \
-                           src/uefi/crypto/sha1.c \
-                           src/uefi/crypto/sha256.c \
-                           $(TOOL_ED25519) $(TOOL_UTIL)
-	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
-
-$(TOOLS_DIR)/ivo-convert: $(TOOLS_DIR)/ivo-convert.c $(TOOL_CONFIG) $(TOOL_UTIL)
-	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
-
-$(TOOLS_DIR)/ivo-install: $(TOOLS_DIR)/ivo-install.c $(TOOL_CONFIG) $(TOOL_UTIL)
-	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
-
-$(TOOLS_DIR)/ivo-config: $(TOOLS_DIR)/ivo-config.c $(TOOL_CONFIG) $(TOOL_UTIL)
-	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
-
-$(TOOLS_DIR)/ivo-doctor: $(TOOLS_DIR)/ivo-doctor.c \
-                         src/uefi/crypto/ed25519_verify.c \
-                         $(TOOL_ED25519) $(TOOL_CONFIG) $(TOOL_UTIL)
-	$(HOST_CC) $(TOOL_CFLAGS) -o $@ $(filter %.c,$^)
+$(TOOLS_DIR)/ivo-build: $(TOOLS_DIR)/ivo-build.c \
+                        $(TOOLS_DIR)/ivo-util.c \
+                        $(TOOLS_DIR)/ivo-util.h \
+                        $(TOOL_CONFIG) \
+                        src/uefi/crypto/sha512.c \
+                        src/uefi/security/password.c \
+                        $(TOOLS_DIR)/third_party/stb_truetype.h
+	$(HOST_CC) $(TOOL_CFLAGS) -I$(TOOLS_DIR) -o $@ \
+	    $(filter %.c,$^) -lm
 
 tools: $(TOOLS_BIN)
 
@@ -272,17 +261,15 @@ src/uefi/security/stack_chk.efi.o: src/uefi/security/stack_chk.c
 %.efi.o: %.asm
 	$(ASM_EFI) $(ASMFLAGS_EFI) -o $@ $<
 
-install: ivo.efi
+install: ivo.efi tools
 	@test -n "$(ESP)" || { echo "usage: make install ESP=/boot/efi" >&2; exit 1; }
-	@test -d "$(ESP)" || { echo "make install: $(ESP): not a directory" >&2; exit 1; }
-	@install -d "$(ESP)/EFI/BOOT"
-	@install -m 0644 ivo.efi "$(ESP)/EFI/BOOT/BOOTX64.EFI"
-	@echo "installed $(ESP)/EFI/BOOT/BOOTX64.EFI"
+	@$(TOOLS_DIR)/ivo install uefi --esp "$(ESP)" --efi ivo.efi
 
 uninstall:
 	@test -n "$(ESP)" || { echo "usage: make uninstall ESP=/boot/efi" >&2; exit 1; }
-	@rm -f "$(ESP)/EFI/BOOT/BOOTX64.EFI"
-	@echo "removed $(ESP)/EFI/BOOT/BOOTX64.EFI"
+	@rm -f "$(ESP)/EFI/ivo/ivo.efi"
+	@echo "removed $(ESP)/EFI/ivo/ivo.efi"
+	@echo "(NVRAM entry left in place; remove via firmware setup or efibootmgr -b XXXX -B)"
 
 clean:
 	rm -f ivo.efi

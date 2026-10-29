@@ -1,10 +1,9 @@
-/* Host-side glue for the bootloader code ivo-sign links: the
- * allocator config.c and iso9660.c call, stubs for the block-device
- * paths that are never reached on the host, and a small wrapper around
- * iso9660.c's memory mode.
+/* Host-side glue for the bootloader code ivo links: stubs for
+ * the block-device paths that are never reached on the host, and a
+ * small wrapper around iso9660.c's memory mode.
  *
  * This file includes fs/fs.h, whose `struct stat` clashes with the
- * libc one, so it stays separate from ivo-sign.c. */
+ * libc one, so it stays separate from ivo.c. */
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -13,9 +12,7 @@
 
 #include "fs/fs.h"
 
-void *mm_alloc(size_t n) { return malloc(n); }
-void  mm_free(void *p)   { free(p); }
-void  con_puts(const char *s) { (void)s; }
+void con_puts(const char *s) { (void)s; }
 int hal_read_blocks(uint64_t lba, uint32_t count, void *buf)
 {
     (void)lba; (void)count; (void)buf;
@@ -42,13 +39,12 @@ int ivo_iso_read_file(const uint8_t *img, size_t size, const char *path,
                       uint8_t **out, size_t *out_len)
 {
     if (iso9660_mount_memory(img, size) != 0) return -1;
-
     struct stat st;
     if (iso9660_stat(path, &st) != 0 || (st.mode & 0170000) != 0100000) {
         iso9660_umount();
         return -1;
     }
-    if (st.size > size) {               /* cannot be inside the image */
+    if (st.size > size) {
         iso9660_umount();
         return -1;
     }
@@ -57,8 +53,7 @@ int ivo_iso_read_file(const uint8_t *img, size_t size, const char *path,
     if (!buf) { iso9660_umount(); return -1; }
     size_t got = want;
     if (iso9660_read(path, buf, &got) != 0 || got != want) {
-        free(buf);
-        iso9660_umount();
+        free(buf); iso9660_umount();
         return -1;
     }
     iso9660_umount();

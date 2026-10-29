@@ -12,6 +12,7 @@ int gfx_init(void)
 
     if (!m.framebuffer ||
         m.bpp != 32 ||
+        (m.pitch & 3) != 0 ||
         m.width < 640 || m.width > 16384 ||
         m.height < 480 || m.height > 16384 ||
         m.pitch < m.width * 4 || m.pitch > m.width * 8 ||
